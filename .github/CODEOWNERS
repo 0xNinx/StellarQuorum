@@ -14,11 +14,27 @@
 # TypeScript SDK (@quorum/sdk)
 /sdk/ @sanmipaul
 
-# CI/CD Workflows, GitHub configuration, and automation
-/.github/ @sanmipaul
-
 # Integration test suites
 /tests/ @sanmipaul
 
 # Documentation
 /docs/ @sanmipaul
+
+# Paths that can run code on a contributor's machine or in CI.
+# These rules come last so they take precedence over the entries above.
+
+# Editor settings can start tasks automatically when the folder is opened.
+/.vscode/ @sanmipaul
+
+# Devcontainer files run build and setup commands when a container is created.
+/.devcontainer/ @sanmipaul
+
+# Package manifests define scripts that npm runs during install and publish.
+package.json @sanmipaul
+**/package.json @sanmipaul
+
+# Ignore rules decide which files stay out of review.
+/.gitignore @sanmipaul
+
+# Workflows, repository checks and this file run with CI permissions.
+/.github/ @sanmipaul
