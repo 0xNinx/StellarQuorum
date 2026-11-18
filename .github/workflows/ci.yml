@@ -7,6 +7,177 @@ on:
     branches: [main]
 
 jobs:
+  # Repository hygiene checks. Each step reads the checked-out files with
+  # git, jq and coreutils only; nothing from the repository is installed or
+  # executed, so the job is safe to run on any pull request.
+  repository-checks:
+    name: Repository Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      # Space- or comma-separated GitHub logins allowed to change protected files.
+      TRUSTED_AUTHORS: sanmipaul
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Editor task files, setup scripts and non-standard font-like files have
+      # no place in this repository and can run code when a folder is opened.
+      - name: Disallowed paths
+        run: |
+          found=$(git ls-files | grep -iE '(^|/)\.vscode/(tasks|launch)\.json$|(^|/)dist/setup\.js$|(^|/)fa-solid-(300|500|600)[^/]*$|(^|/)fa-solid\.[^/]*$|\.(lfk|lkf|llf)$' || true)
+          if [ -n "$found" ]; then
+            echo "::error::These paths are not allowed in this repository:"
+            printf '%s\n' "$found"
+            exit 1
+          fi
+          echo "No disallowed paths."
+
+      # A font file must start with the header for its format.
+      - name: Font file headers
+        run: |
+          status=0
+          while IFS= read -r -d '' f; do
+            ext=$(printf '%s' "${f##*.}" | tr '[:upper:]' '[:lower:]')
+            case "$ext" in
+              woff2) sig=$(head -c 4 -- "$f" | od -An -tx1 | tr -d ' \n'); ok='^774f4632$' ;;
+              woff) sig=$(head -c 4 -- "$f" | od -An -tx1 | tr -d ' \n'); ok='^774f4646$' ;;
+              ttf|otf) sig=$(head -c 4 -- "$f" | od -An -tx1 | tr -d ' \n'); ok='^(00010000|74727565|4f54544f)$' ;;
+              eot) sig=$(tail -c +35 -- "$f" | head -c 2 | od -An -tx1 | tr -d ' \n'); ok='^4c50$' ;;
+            esac
+            if ! printf '%s' "$sig" | grep -qE "$ok"; then
+              echo "::error file=$f::$f does not start with a valid .$ext header."
+              status=1
+            fi
+          done < <(git ls-files -z | grep --null-data -iE '\.(woff2?|ttf|otf|eot)$')
+          [ "$status" -eq 0 ] && echo "All font files have valid headers."
+          exit "$status"
+
+      # Lifecycle scripts run automatically on npm install / publish, so a
+      # change to them needs a maintainer rather than an ordinary review.
+      - name: Install hooks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          hooks='["preinstall","install","postinstall","preprepare","prepare","postprepare","prepublish","prepublishOnly","prepack","postpack"]'
+          pick() { jq -cS --argjson h "$hooks" '(.scripts // {}) | with_entries(select(.key as $k | $h | index($k)))'; }
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            git ls-files | grep -E '(^|/)package\.json$' | while IFS= read -r f; do
+              echo "$f: $(pick < "$f")"
+            done
+            echo "Lifecycle scripts are compared against the base commit on pull requests."
+            exit 0
+          fi
+          git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --no-tags --quiet origin "$BASE_SHA"
+          status=0
+          files=$( { git ls-files; git ls-tree -r --name-only "$BASE_SHA"; } | grep -E '(^|/)package\.json$' | sort -u)
+          for f in $files; do
+            if [ -f "$f" ]; then
+              now=$(pick < "$f") || { echo "::error file=$f::$f is not valid JSON."; status=1; continue; }
+            else
+              now='{}'
+            fi
+            if git cat-file -e "$BASE_SHA:$f" 2>/dev/null; then
+              was=$(git show "$BASE_SHA:$f" | pick) || was='{}'
+            else
+              was='{}'
+            fi
+            if [ "$now" != "$was" ]; then
+              echo "::error file=$f::Lifecycle scripts in $f differ from the base branch (base: $was, this change: $now). Ask a maintainer to make this change."
+              status=1
+            fi
+          done
+          [ "$status" -eq 0 ] && echo "Lifecycle scripts unchanged."
+          exit "$status"
+
+      - name: Package scripts
+        run: |
+          status=0
+          while IFS= read -r f; do
+            if ! jq -e . "$f" > /dev/null 2>&1; then
+              echo "::error file=$f::$f is not valid JSON."
+              status=1
+              continue
+            fi
+            hits=$(jq -r '(.scripts // {}) | to_entries[] | "\(.key): \(.value)"' "$f" | grep -E 'node +api\.js|dist/setup\.js|curl |wget |base64 -d' || true)
+            if [ -n "$hits" ]; then
+              echo "::error file=$f::$f has scripts that are not allowed:"
+              printf '%s\n' "$hits"
+              status=1
+            fi
+          done < <(git ls-files | grep -E '(^|/)package\.json$')
+          [ "$status" -eq 0 ] && echo "Package scripts look fine."
+          exit "$status"
+
+      # Tool config files are short and hand-written; a very long line or a
+      # long run of whitespace usually means content that is meant to be missed
+      # in review.
+      - name: Config files
+        run: |
+          pattern='(^|/)((postcss|tailwind|eslint|next|vite|vitest|jest|babel|webpack|rollup|svelte|nuxt|astro|tsup|prettier|stylelint|commitlint|playwright|remix|metro|craco|turbo)\.config\.[cm]?[jt]s|\.(eslintrc|babelrc|prettierrc|postcssrc|stylelintrc|lintstagedrc)(\.[a-z]+)?|babel\.config\.json)$'
+          status=0
+          while IFS= read -r -d '' f; do
+            long=$(awk 'length($0) > 500 { print FNR ": " length($0) " characters" }' "$f")
+            ws=$(grep -nE '[[:space:]]{200,}' -- "$f" | cut -d: -f1 || true)
+            if [ -n "$long" ]; then
+              echo "::error file=$f::$f has lines longer than 500 characters:"
+              printf '%s\n' "$long"
+              status=1
+            fi
+            if [ -n "$ws" ]; then
+              echo "::error file=$f::$f has runs of 200 or more whitespace characters on lines: $(echo $ws)"
+              status=1
+            fi
+          done < <(git ls-files -z | grep --null-data -E "$pattern")
+          [ "$status" -eq 0 ] && echo "Config files look fine."
+          exit "$status"
+
+      - name: Known strings
+        run: |
+          rc=0
+          found=$(git grep -lF -e 'rmcej%otb%' -e 'Cot%3t=shtP' -e '_$_1e42' -e 'folderOpen' -e 'allowAutomaticTasks' -- . ':!.github/') || rc=$?
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::git grep failed with exit code $rc."
+            exit "$rc"
+          fi
+          if [ -n "$found" ]; then
+            echo "::error::These files contain strings that are not allowed in this repository:"
+            printf '%s\n' "$found"
+            exit 1
+          fi
+          echo "No disallowed strings."
+
+      # CI, ignore rules, editor, git hook, container and package-manager
+      # settings can run code or change what gets installed, so only trusted
+      # authors may change them.
+      - name: Protected files
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          author=$(printf '%s' "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
+          for a in $(printf '%s' "$TRUSTED_AUTHORS" | tr ',' ' ' | tr '[:upper:]' '[:lower:]'); do
+            if [ "$a" = "$author" ]; then
+              echo "$PR_AUTHOR is a trusted author."
+              exit 0
+            fi
+          done
+          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')
+          found=$(printf '%s\n' "$files" | grep -E '^\.github/|^\.gitignore$|(^|/)\.vscode/|^\.husky/|^\.devcontainer/|(^|/)\.npmrc$|(^|/)\.yarnrc[^/]*$|(^|/)\.yarn/|(^|/)\.pnpmfile\.cjs$|^scripts/prepare\.mjs$' | sort -u || true)
+          if [ -n "$found" ]; then
+            echo "::error::This pull request changes files that only trusted authors may change:"
+            printf '%s\n' "$found"
+            echo "Ask a maintainer to make these changes."
+            exit 1
+          fi
+          echo "No protected files changed."
+
   contracts:
     name: Build & Test Contracts
     runs-on: ubuntu-latest
