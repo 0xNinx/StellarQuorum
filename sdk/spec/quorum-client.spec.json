@@ -210,24 +210,6 @@
       "returns": "Promise<Proposal[]>"
     },
     {
-      "name": "getProposalsByProposer",
-      "parameters": [
-        {
-          "name": "proposer",
-          "type": "string",
-          "optional": false,
-          "rest": false
-        },
-        {
-          "name": "options",
-          "type": "ReadOptions",
-          "optional": true,
-          "rest": false
-        }
-      ],
-      "returns": "Promise<Proposal[]>"
-    },
-    {
       "name": "getProposals",
       "parameters": [
         {
@@ -250,6 +232,60 @@
         }
       ],
       "returns": "Promise<Proposal[]>"
+    },
+    {
+      "name": "getProposalsByProposer",
+      "parameters": [
+        {
+          "name": "proposer",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<Proposal[]>"
+    },
+    {
+      "name": "getCosponsors",
+      "parameters": [
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string[]>"
+    },
+    {
+      "name": "getConviction",
+      "parameters": [
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<ConvictionTally | null>"
     },
     {
       "name": "balance",
@@ -420,6 +456,84 @@
           "name": "description",
           "type": "string",
           "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildCreateCosponsoredProposal",
+      "parameters": [
+        {
+          "name": "proposer",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "cosponsors",
+          "type": "string[]",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "metadataUri",
+          "type": "any",
+          "optional": true,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildCreateConvictionProposal",
+      "parameters": [
+        {
+          "name": "proposer",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "metadataUri",
+          "type": "any",
+          "optional": true,
           "rest": false
         },
         {
@@ -653,6 +767,246 @@
         {
           "name": "amount",
           "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildPause",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildUnpause",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildSetGuardian",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "newGuardian",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildSetProposalDeposit",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "amount",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildSetProposerCooldown",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "ledgers",
+          "type": "number",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildAllowTarget",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildDisallowTarget",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildTransferAdmin",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "newAdmin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildAcceptAdmin",
+      "parameters": [
+        {
+          "name": "pendingAdmin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildCancelAdminTransfer",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildUpgrade",
+      "parameters": [
+        {
+          "name": "admin",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "newWasmHash",
+          "type": "string",
           "optional": false,
           "rest": false
         },
