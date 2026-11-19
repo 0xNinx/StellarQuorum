@@ -833,6 +833,105 @@ export class QuorumClient {
       nativeToScVal(amount, { type: 'i128' }),
     );
   }
+
+  // ─── Admin Transaction Builders ──────────────────────────────────────────
+
+  /** Temporarily pause all contract operations. The admin must authorize. */
+  async buildPause(admin: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'pause',
+      new Address(admin).toScVal(),
+    );
+  }
+
+  /** Resume contract operations after a pause. The admin must authorize. */
+  async buildUnpause(admin: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'unpause',
+    );
+  }
+
+  /** Change the account that can veto proposals. The admin must authorize. */
+  async buildSetGuardian(admin: string, newGuardian: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'set_guardian',
+      new Address(newGuardian).toScVal(),
+    );
+  }
+
+  /** Set the deposit required to open a proposal. The admin must authorize. */
+  async buildSetProposalDeposit(admin: string, amount: bigint, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'set_proposal_deposit',
+      nativeToScVal(amount, { type: 'i128' }),
+    );
+  }
+
+  /** Set the minimum ledgers a proposer must wait between opening proposals. The admin must authorize. */
+  async buildSetProposerCooldown(admin: string, ledgers: number, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'set_proposer_cooldown',
+      nativeToScVal(ledgers, { type: 'u32' }),
+    );
+  }
+
+  /** Add a contract to the allowlist of targets a proposal can call. The admin must authorize. */
+  async buildAllowTarget(admin: string, target: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'allow_target',
+      new Address(target).toScVal(),
+    );
+  }
+
+  /** Remove a contract from the allowlist of targets a proposal can call. The admin must authorize. */
+  async buildDisallowTarget(admin: string, target: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'disallow_target',
+      new Address(target).toScVal(),
+    );
+  }
+
+  /** Initiate an admin transfer. The current admin must authorize. */
+  async buildTransferAdmin(admin: string, newAdmin: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'transfer_admin',
+      new Address(newAdmin).toScVal(),
+    );
+  }
+
+  /** Accept a pending admin transfer. The pending admin must authorize. */
+  async buildAcceptAdmin(pendingAdmin: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? pendingAdmin,
+      'accept_admin',
+    );
+  }
+
+  /** Cancel a pending admin transfer. The current admin must authorize. */
+  async buildCancelAdminTransfer(admin: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'cancel_admin_transfer',
+    );
+  }
+
+  /** Replace the governance contract WASM. The admin must authorize. */
+  async buildUpgrade(admin: string, newWasmHash: string, source?: string): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? admin,
+      'upgrade',
+      new Address(admin).toScVal(),
+      nativeToScVal(newWasmHash, { type: 'bytes' }),
+    );
+  }
 }
 
 function delay(milliseconds: number): Promise<void> {
