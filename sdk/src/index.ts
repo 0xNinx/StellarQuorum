@@ -15,6 +15,7 @@ export type {
   ProposalActionSetEvent,
   ProposalCancelledEvent,
   ProposalCreatedEvent,
+  ProposalExpiredEvent,
   ProposalDepositUpdatedEvent,
   ProposalExecutedEvent,
   ProposalFinalizedEvent,

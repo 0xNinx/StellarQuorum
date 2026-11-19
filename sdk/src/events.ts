@@ -25,6 +25,7 @@ export const EVENT_TOPICS = [
   'proposal_queued',
   'proposal_executed',
   'proposal_cancelled',
+  'proposal_expired',
   'proposal_vetoed',
   'proposal_action_set',
   'transfer',
@@ -95,6 +96,11 @@ export interface ProposalCancelledEvent {
   type: 'proposal_cancelled';
   id: bigint;
   caller: string;
+}
+
+export interface ProposalExpiredEvent {
+  type: 'proposal_expired';
+  id: bigint;
 }
 
 export interface ProposalVetoedEvent {
@@ -235,6 +241,7 @@ export type QuorumEvent =
   | ProposalQueuedEvent
   | ProposalExecutedEvent
   | ProposalCancelledEvent
+  | ProposalExpiredEvent
   | ProposalVetoedEvent
   | ProposalActionSetEvent
   | TransferEvent
@@ -400,6 +407,8 @@ export function decodeEvent(event: RawContractEvent): QuorumEvent | null {
         id: field<bigint>(raw, 'id', topic),
         caller: field<string>(raw, 'caller', topic),
       };
+    case 'proposal_expired':
+      return { type: 'proposal_expired', id: field<bigint>(raw, 'id', topic) };
     case 'transfer':
       return {
         type: 'transfer',

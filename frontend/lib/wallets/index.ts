@@ -1,16 +1,17 @@
+import { AlbedoAdapter } from "./AlbedoAdapter";
 import { FreighterAdapter } from "./FreighterAdapter";
 import { WalletAdapter } from "./types";
 
-export { FreighterAdapter };
+export { AlbedoAdapter, FreighterAdapter };
 export type { WalletAdapter };
 
 export function getAvailableWallets(): WalletAdapter[] {
-  const adapters = [new FreighterAdapter()];
+  const adapters = [new FreighterAdapter(), new AlbedoAdapter()];
   return adapters.filter((adapter) => adapter.isAvailable());
 }
 
 export function getWalletAdapter(id: string): WalletAdapter | null {
-  const adapters = [new FreighterAdapter()];
+  const adapters = [new FreighterAdapter(), new AlbedoAdapter()];
   const adapter = adapters.find((a) => a.id === id);
   return adapter && adapter.isAvailable() ? adapter : null;
 }

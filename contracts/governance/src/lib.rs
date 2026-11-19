@@ -221,6 +221,12 @@ pub struct ProposalCancelled {
     pub caller: Address,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposalExpired {
+    pub id: u64,
+}
+
 /// Emitted when the guardian vetoes a queued proposal. `reason` gives token
 /// holders an on-chain record of why a passed proposal was blocked.
 #[contracttype]
@@ -1193,6 +1199,10 @@ impl GovernanceContract {
             env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
             Self::touch_proposal(&env, proposal_id);
             Self::record_status_change(&env, &ProposalStatus::Queued, &ProposalStatus::Expired);
+            env.events().publish(
+                (Symbol::new(&env, "proposal_expired"), proposal_id),
+                ProposalExpired { id: proposal_id },
+            );
             Ok(())
         } else {
             Err(GovernanceError::TimelockNotExpired)

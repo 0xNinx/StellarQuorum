@@ -1,4 +1,21 @@
-import { DEFAULT_SETTINGS, isValidRpcUrl } from "./settings";
+import { DEFAULT_SETTINGS, isRpcUrlAllowedByCsp, isValidRpcUrl } from "./settings";
+
+describe("isRpcUrlAllowedByCsp", () => {
+  const deployment = "https://rpc.example.com/soroban";
+
+  it("accepts empty, *.stellar.org over https, and the deployment's own origin", () => {
+    expect(isRpcUrlAllowedByCsp("", deployment)).toBe(true);
+    expect(isRpcUrlAllowedByCsp("https://soroban-rpc.stellar.org", deployment)).toBe(true);
+    expect(isRpcUrlAllowedByCsp("https://rpc.example.com/other", deployment)).toBe(true);
+  });
+
+  it("rejects origins the CSP connect-src does not permit", () => {
+    expect(isRpcUrlAllowedByCsp("https://rpc.attacker.example", deployment)).toBe(false);
+    expect(isRpcUrlAllowedByCsp("http://soroban-rpc.stellar.org", deployment)).toBe(false);
+    expect(isRpcUrlAllowedByCsp("https://evilstellar.org", deployment)).toBe(false);
+    expect(isRpcUrlAllowedByCsp("https://rpc.attacker.example", undefined)).toBe(false);
+  });
+});
 
 // Issue #279: the RPC override is optional, but when it is set it has to be a
 // web URL the browser can actually call.
