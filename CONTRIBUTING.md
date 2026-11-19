@@ -540,7 +540,10 @@ The Soroban contracts in `contracts/` are the heart of Quorum. Changes here requ
    - Use `checked_add()`, `checked_sub()` for all arithmetic
    - Emit an event via `env.events().publish()` for every state change
 3. Add the function to the contract's `README.md` with parameter docs
-4. Write at least 2 unit tests in `src/tests.rs` (happy path + error case)
+4. Write at least 2 unit tests in the appropriate test file:
+   - **Governance contract tests**: `contracts/governance/src/lib.rs` (inline `#[cfg(test)] mod tests`)
+   - **Token contract tests**: `contracts/token/src/lib.rs` (inline `#[cfg(test)] mod tests`) or `contracts/token/tests/`
+   - Use happy path + error case per test, covering the main behavior and edge cases
 
 ### Writing Contract Tests
 
@@ -721,6 +724,21 @@ Good documentation is as important as code. All documentation lives in `docs/` (
 - Code examples must be complete and runnable
 - Every new contract function needs documentation in the contract's `README.md`
 - Every new SDK method needs JSDoc with `@param`, `@returns`, `@throws`, and `@example`
+
+### Architecture Decision Records (ADRs)
+
+For significant design decisions—especially those involving trade-offs between approaches—record your reasoning in an [Architecture Decision Record](docs/adr/).
+
+**Write an ADR when:**
+- You are making a choice that affects multiple systems or long-term maintainability (e.g., protocol mechanics, contract ownership boundaries, storage strategies)
+- The decision involves trade-offs that future contributors should understand
+- The choice is unlikely to change once made
+
+**Do not write an ADR for:**
+- Routine code changes, bug fixes, or small refactors
+- Decisions that are obvious from the code
+
+See [docs/adr/README.md](docs/adr/README.md) for guidance, the [template](docs/adr/TEMPLATE.md), and examples.
 
 ### FAQ
 
