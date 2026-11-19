@@ -111,3 +111,15 @@ export interface GetProposalsOptions extends ReadOptions {
   limit?: number;
   offset?: number;
 }
+
+/** Aggregate governance statistics returned by `getGovernanceStats()`. */
+export interface GovernanceStats {
+  totalProposals: number;
+  activeProposals: number;
+  queuedProposals: number;
+  executedProposals: number;
+  failedProposals: number;
+  cancelledProposals: number;
+  expiredProposals: number;
+  vetoedProposals: number;
+}
