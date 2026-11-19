@@ -225,6 +225,11 @@ export class QuorumClient {
         timelockPeriod: raw.timelock_period,
         proposalThreshold: raw.proposal_threshold,
         admin: raw.admin,
+        guardian: raw.guardian ?? '',
+        executionGracePeriod: raw.execution_grace_period ?? 0,
+        paused: raw.paused ?? false,
+        proposalDeposit: raw.proposal_deposit ?? BigInt(0),
+        proposerCooldown: raw.proposer_cooldown ?? 0,
       };
     });
   }
@@ -833,6 +838,83 @@ export class QuorumClient {
       nativeToScVal(amount, { type: 'i128' }),
     );
   }
+
+  // ── Admin transfer (issue #437) ──────────────────────────────────────────
+
+  /**
+   * Propose a new admin for the token contract.
+   * The proposed admin must call `acceptAdmin` to complete the transfer.
+   * Emits an `admin_transfer_proposed` event.
+   */
+  async buildTransferAdmin(currentAdmin: string, newAdmin: string, source?: string): Promise<string> {
+    return this.buildTokenTransaction(
+      source ?? currentAdmin,
+      'transfer_admin',
+      nativeToScVal(newAdmin, { type: 'address' }),
+    );
+  }
+
+  /**
+   * Cancel a pending admin transfer proposal.
+   * Only the current admin can call this.
+   * Emits an `admin_transfer_cancelled` event.
+   */
+  async buildCancelAdminTransfer(currentAdmin: string, source?: string): Promise<string> {
+    return this.buildTokenTransaction(
+      source ?? currentAdmin,
+      'cancel_admin_transfer',
+    );
+  }
+
+  // ── Proposal actions (issue #452) ────────────────────────────────────────
+
+  /**
+   * Attach an on-chain action to a proposal.
+   * Actions are executed when the proposal is executed.
+   *
+   * Common arg encoding:
+   *   - string  → `nativeToScVal(value, { type: 'string' })`
+   *   - bigint  → `nativeToScVal(value, { type: 'i128' })`
+   *   - address → `nativeToScVal(value, { type: 'address' })`
+   */
+  async buildSetProposalAction(
+    proposer: string,
+    proposalId: bigint,
+    action: ProposalAction,
+    source?: string,
+  ): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source ?? proposer,
+      'set_proposal_action',
+      nativeToScVal(proposalId, { type: 'u64' }),
+      nativeToScVal(action.targetContractId, { type: 'address' }),
+      nativeToScVal(action.functionName, { type: 'symbol' }),
+      nativeToScVal(action.args),
+    );
+  }
+
+  /** Fetch the on-chain actions attached to a proposal. */
+  async getProposalActions(proposalId: bigint, options?: ReadOptions): Promise<ProposalAction[]> {
+    const raw = await this.simulate<unknown[]>('get_proposal_actions', nativeToScVal(proposalId, { type: 'u64' }));
+    if (!Array.isArray(raw)) return [];
+    return raw.map((item: unknown) => {
+      const r = item as { target_contract_id: string; function_name: string; args: unknown[] };
+      return {
+        targetContractId: r.target_contract_id,
+        functionName: r.function_name,
+        args: r.args ?? [],
+      };
+    });
+  }
+
+  /**
+   * Check whether a target contract is in the governance allowlist.
+   * Proposals targeting disallowed contracts are rejected at submission.
+   */
+  async isTargetAllowed(targetContractId: string, options?: ReadOptions): Promise<boolean> {
+    const raw = await this.simulate<boolean>('is_target_allowed', nativeToScVal(targetContractId, { type: 'address' }));
+    return raw === true;
+  }
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -885,6 +967,9 @@ interface RawProposal {
   queue_ledger: number;
   quorum_required: bigint;
   status: [string];
+  timelock_period?: number;
+  metadata_uri?: string;
+  kind?: [string];
 }
 
 interface RawConfig {
@@ -894,6 +979,11 @@ interface RawConfig {
   timelock_period: number;
   proposal_threshold: bigint;
   admin: string;
+  guardian?: string;
+  execution_grace_period?: number;
+  paused?: boolean;
+  proposal_deposit?: bigint;
+  proposer_cooldown?: number;
 }
 
 function decodeProposal(raw: RawProposal): Proposal {
@@ -911,11 +1001,15 @@ function decodeProposal(raw: RawProposal): Proposal {
     queueLedger: raw.queue_ledger,
     quorumRequired: raw.quorum_required,
     status: decodeStatus(raw.status),
+    timelockPeriod: raw.timelock_period ?? 0,
+    metadataUri: raw.metadata_uri,
+    kind: raw.kind ? (raw.kind[0] as 'Standard' | 'Upgrade') : 'Standard',
   };
 }
 
+/** On-chain statuses the contract can store on a Proposal. */
 const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
-  'Pending', 'Active', 'Passed', 'Failed', 'Queued', 'Executed', 'Cancelled',
+  'Active', 'Failed', 'Queued', 'Executed', 'Cancelled', 'Expired', 'Vetoed',
 ];
 
 /** Unit enum variant `[name]` → ProposalStatus, rejecting names the SDK does not know. */
