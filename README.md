@@ -13,14 +13,30 @@ As Stellar moves from a foundation-driven upgrade model to community-driven gove
 
 ### Proposal Lifecycle
 
-| State | Description |
+The contract stores one of seven statuses (`ProposalStatus` in `contracts/governance/src/lib.rs`):
+
+| Stored status | Description |
 |---|---|
-| Pending | Created, voting not yet started (reported by `get_proposal_phase`; the stored status stays `Active`) |
-| Active | Voting window is open |
-| Failed | Quorum not reached or majority Against |
-| Queued | Passed, waiting in 48-hour timelock |
-| Executed | Timelock expired, on-chain actions executed |
-| Cancelled | Cancelled by proposer before voting ends |
+| Active | Created. Covers the time before voting starts, the voting window, and after voting ends until `finalize()` is called |
+| Failed | Finalized without quorum, or with a majority Against |
+| Queued | Finalized as passed, in the timelock and then the execution window |
+| Executed | Executed after the timelock (executable proposals only) |
+| Cancelled | Cancelled by the proposer before voting ends |
+| Expired | Queued but not executed within `execution_grace_period` ledgers after the timelock ends; set by `mark_expired()` |
+| Vetoed | Vetoed by the guardian while queued, before the timelock ends |
+
+`get_proposal_phase()` derives a finer phase (`ProposalPhase`) from the stored status and the current ledger:
+
+| Phase | Derived when |
+|---|---|
+| Pending | `Active`, before `start_ledger` |
+| Active | `Active`, voting window open (up to `end_ledger`) |
+| Ended | `Active`, after `end_ledger`, not yet finalized |
+| Queued | `Queued`, before `queue_ledger` (timelock still running) |
+| ReadyToExecute | `Queued`, timelock over, within the grace period, executable proposal |
+| Passed | `Queued`, timelock over, within the grace period, signaling proposal |
+| Expired | `Queued` past the grace period (before `mark_expired()` runs), or stored `Expired` |
+| Executed, Failed, Cancelled, Vetoed | The matching stored status |
 
 ### Quorum
 

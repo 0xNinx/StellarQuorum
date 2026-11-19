@@ -127,7 +127,7 @@ ledger in which its balance changes.
 them, which is kept as the balance in effect at the cutoff. Any snapshot inside
 the window still resolves correctly. A snapshot older than the window reads as
 `0`, which is safe while the window exceeds the longest voting period. If
-governance is configured with a longer `voting_period`, raise the constant.
+governance is configured with a longer `voting_period`, raise the constant. The limit this puts on governance parameters is described in [Choosing Governance Parameters](../../docs/governance-parameters.md#voting_period--voting-window).
 
 **Strategy deferred: paging the vector across keys.** Pruning bounds history by
 time, not by count. An address that changes balance in most ledgers can still

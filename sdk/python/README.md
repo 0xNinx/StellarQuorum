@@ -78,3 +78,36 @@ python -m build sdk/python
 Tests run offline against an HTTP mock provider and share the exact base64
 XDR fixtures in `sdk/test/fixtures/governance-reads.json` with the TypeScript
 tests, including u64/i128 values above JavaScript's safe integer range.
+
+## Development
+
+Set up a virtual environment and install the package in editable mode with its
+test extra, from the repository root:
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+python -m pip install -e './sdk/python[test]'
+python -m pytest sdk/python/tests
+```
+
+The tests need no network: they use an HTTP mock provider. CI runs the same
+commands on Python 3.10 in the `sdk-python` job of `.github/workflows/ci.yml`,
+then builds the source and wheel distributions with `python -m build sdk/python`.
+
+### Parity with the TypeScript SDK
+
+Parity is checked through shared fixtures, not by calling the TypeScript code.
+`sdk/test/fixtures/governance-reads.json` holds the base64 XDR the contract
+returns for each read, together with the decoded values. Both the TypeScript test
+`sdk/test/python-parity.test.ts` and `sdk/python/tests/test_client.py` decode the same fixtures and must
+produce the same values. When a contract read or type changes, update that
+fixture and both SDKs in the same pull request.
+
+## Releases
+
+The Python SDK is **not published to PyPI**, and no workflow uploads it. The
+version in `pyproject.toml` is bumped by hand alongside the TypeScript SDK.
+Install it from source or from a pinned Git tag as described above. Publishing
+to PyPI would need a project owner, a trusted-publisher or token secret, and a
+release job; until then, [docs/publishing.md](../../docs/publishing.md) lists
+only the npm package.
