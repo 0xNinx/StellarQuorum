@@ -121,3 +121,32 @@ function escapeIcal(text: string): string {
     .replace(/,/g, '\\,')
     .replace(/\n/g, '\\n');
 }
+
+
+  const readIcs = (): Promise<string> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsText(createObjectURLSpy.mock.calls[0][0] as Blob);
+    });
+
+  it("adds an executable event for queued proposals", async () => {
+    render(<AddToCalendar proposal={{ ...mockProposal, status: "passed", queueTime: "2026-05-21T10:00:00Z" }} />);
+    fireEvent.click(screen.getByRole("button", { name: /add voting deadline to calendar/i }));
+
+    const ics = await readIcs();
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+    expect(ics).toContain("UID:QIP-001-executable@stellarquorum");
+    expect(ics).toContain("SUMMARY:Executable: Test Proposal");
+    expect(ics).toContain("DTSTART:20260521T100000Z");
+    expect(ics).toContain("DTEND:20260521T110000Z");
+  });
+
+  it("emits only the voting event when the proposal is not queued", async () => {
+    render(<AddToCalendar proposal={{ ...mockProposal, status: "executed", queueTime: "2026-05-21T10:00:00Z" }} />);
+    fireEvent.click(screen.getByRole("button", { name: /add voting deadline to calendar/i }));
+
+    const ics = await readIcs();
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(ics).not.toContain("Executable:");
+  });
