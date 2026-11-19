@@ -610,6 +610,23 @@ The same votes on a standard proposal are counted without decay, so a tie there
 fails. The conviction design is summarized in
 [docs/architecture.md](../../docs/architecture.md#conviction-voting).
 
+### Worked Example: Conviction Decay Over 10 Days
+
+A 10-day proposal (172,800 ledgers) with two voters, each holding 1,000 tokens:
+
+| When | Voter | Vote | Power | Days elapsed | Half-lives passed | Decayed power |
+|---|---|---|---|---|---|---|
+| Day 0 (ledger 0) | Against | Against | 1,000 | — | — | — |
+| Day 3 (ledger 51,840) | For | For | 1,000 | — | — | — |
+| **Day 10 (ledger 172,800, end)** | — | — | — | **10 days since Against** | **3 half-lives** | **125** |
+| **Day 10 (ledger 172,800, end)** | — | — | — | **7 days since For** | **2 half-lives** | **250** |
+
+**Result:**
+- Raw votes tie (For = 1,000, Against = 1,000), so a standard proposal would fail.
+- Decayed conviction: For = 250, Against = 125 → For wins, proposal passes (if quorum is met).
+
+Decay is stepwise: each whole 3-day half-life divides the tally by 2. A vote held 7 days is therefore worth 1/4 of its power (two half-lives: 1,000 → 500 → 250).
+
 ## Execution Allowlist
 
 A proposal can carry up to 10 on-chain calls, made in order when it executes.
