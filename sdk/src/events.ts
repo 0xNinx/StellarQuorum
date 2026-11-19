@@ -25,6 +25,8 @@ export const EVENT_TOPICS = [
   'proposal_queued',
   'proposal_executed',
   'proposal_cancelled',
+  'proposal_vetoed',
+  'proposal_action_set',
   'transfer',
   'mint',
   'burn',
@@ -34,6 +36,15 @@ export const EVENT_TOPICS = [
   'contract_initialized',
   'contract_paused',
   'contract_unpaused',
+  'guardian_changed',
+  'deposit_refunded',
+  'deposit_forfeited',
+  'target_allowlist_updated',
+  'proposal_deposit_updated',
+  'proposer_cooldown_updated',
+  'upgraded',
+  'stake',
+  'unstake',
 ] as const;
 
 export type QuorumEventType = (typeof EVENT_TOPICS)[number];
@@ -84,6 +95,74 @@ export interface ProposalCancelledEvent {
   type: 'proposal_cancelled';
   id: bigint;
   caller: string;
+}
+
+export interface ProposalVetoedEvent {
+  type: 'proposal_vetoed';
+  id: bigint;
+  guardian: string;
+  reason: string;
+}
+
+export interface ProposalActionSetEvent {
+  type: 'proposal_action_set';
+  id: bigint;
+  target: string;
+  function: string;
+}
+
+export interface GuardianChangedEvent {
+  type: 'guardian_changed';
+  previousGuardian: string;
+  newGuardian: string;
+}
+
+export interface DepositRefundedEvent {
+  type: 'deposit_refunded';
+  id: bigint;
+  proposer: string;
+  amount: bigint;
+}
+
+export interface DepositForfeitedEvent {
+  type: 'deposit_forfeited';
+  id: bigint;
+  amount: bigint;
+}
+
+export interface TargetAllowlistUpdatedEvent {
+  type: 'target_allowlist_updated';
+  admin: string;
+  target: string;
+  allowed: boolean;
+}
+
+export interface ProposalDepositUpdatedEvent {
+  type: 'proposal_deposit_updated';
+  amount: bigint;
+}
+
+export interface ProposerCooldownUpdatedEvent {
+  type: 'proposer_cooldown_updated';
+  ledgers: number;
+}
+
+export interface UpgradedEvent {
+  type: 'upgraded';
+  newWasmHash: string;
+}
+
+export interface StakedEvent {
+  type: 'stake';
+  owner: string;
+  amount: bigint;
+  unlockLedger: number;
+}
+
+export interface UnstakedEvent {
+  type: 'unstake';
+  owner: string;
+  amount: bigint;
 }
 
 // ─── Token events ──────────────────────────────────────────────────────────
@@ -156,6 +235,8 @@ export type QuorumEvent =
   | ProposalQueuedEvent
   | ProposalExecutedEvent
   | ProposalCancelledEvent
+  | ProposalVetoedEvent
+  | ProposalActionSetEvent
   | TransferEvent
   | MintEvent
   | BurnEvent
@@ -163,7 +244,16 @@ export type QuorumEvent =
   | AdminTransferredEvent
   | DelegatedEvent
   | ContractInitializedEvent
-  | ContractPauseEvent;
+  | ContractPauseEvent
+  | GuardianChangedEvent
+  | DepositRefundedEvent
+  | DepositForfeitedEvent
+  | TargetAllowlistUpdatedEvent
+  | ProposalDepositUpdatedEvent
+  | ProposerCooldownUpdatedEvent
+  | UpgradedEvent
+  | StakedEvent
+  | UnstakedEvent;
 
 /**
  * The parts of an RPC event the decoder needs.
@@ -344,6 +434,74 @@ export function decodeEvent(event: RawContractEvent): QuorumEvent | null {
         type: 'admin_transferred',
         previousAdmin: field<string>(raw, 'previous_admin', topic),
         newAdmin: field<string>(raw, 'new_admin', topic),
+      };
+    case 'proposal_vetoed':
+      return {
+        type: 'proposal_vetoed',
+        id: field<bigint>(raw, 'id', topic),
+        guardian: field<string>(raw, 'guardian', topic),
+        reason: field<string>(raw, 'reason', topic),
+      };
+    case 'proposal_action_set':
+      return {
+        type: 'proposal_action_set',
+        id: field<bigint>(raw, 'id', topic),
+        target: field<string>(raw, 'target', topic),
+        function: field<string>(raw, 'function', topic),
+      };
+    case 'guardian_changed':
+      return {
+        type: 'guardian_changed',
+        previousGuardian: field<string>(raw, 'previous_guardian', topic),
+        newGuardian: field<string>(raw, 'new_guardian', topic),
+      };
+    case 'deposit_refunded':
+      return {
+        type: 'deposit_refunded',
+        id: field<bigint>(raw, 'id', topic),
+        proposer: field<string>(raw, 'proposer', topic),
+        amount: field<bigint>(raw, 'amount', topic),
+      };
+    case 'deposit_forfeited':
+      return {
+        type: 'deposit_forfeited',
+        id: field<bigint>(raw, 'id', topic),
+        amount: field<bigint>(raw, 'amount', topic),
+      };
+    case 'target_allowlist_updated':
+      return {
+        type: 'target_allowlist_updated',
+        admin: field<string>(raw, 'admin', topic),
+        target: field<string>(raw, 'target', topic),
+        allowed: field<boolean>(raw, 'allowed', topic),
+      };
+    case 'proposal_deposit_updated':
+      return {
+        type: 'proposal_deposit_updated',
+        amount: field<bigint>(raw, 'amount', topic),
+      };
+    case 'proposer_cooldown_updated':
+      return {
+        type: 'proposer_cooldown_updated',
+        ledgers: field<number>(raw, 'ledgers', topic),
+      };
+    case 'upgraded':
+      return {
+        type: 'upgraded',
+        newWasmHash: field<string>(raw, 'new_wasm_hash', topic),
+      };
+    case 'stake':
+      return {
+        type: 'stake',
+        owner: field<string>(raw, 'owner', topic),
+        amount: field<bigint>(raw, 'amount', topic),
+        unlockLedger: field<number>(raw, 'unlock_ledger', topic),
+      };
+    case 'unstake':
+      return {
+        type: 'unstake',
+        owner: field<string>(raw, 'owner', topic),
+        amount: field<bigint>(raw, 'amount', topic),
       };
     default:
       return null;

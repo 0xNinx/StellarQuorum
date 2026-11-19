@@ -113,9 +113,14 @@ The following `QuorumClient` methods are implemented:
   `getVote`, `getLatestLedger`, `getVotingPower` and `getDelegate`
 - Token reads: `getBalance`, `getTokenDecimals`, `balance`, `getPastBalance`,
   `allowance` and `totalSupply`
-- Transaction flow: `buildFinalize`, `buildExecute`, `buildCancel`,
+- Transaction flow: `buildCreateProposal`, `buildVote`, `buildFinalize`, 
+  `buildExecute`, `buildCancel`, `buildDelegate`, `buildUndelegate`,
   `buildTransfer`, `buildApprove`, `buildTransferFrom`, `submitAndWait`,
   `waitForProposalStatus` and `estimateFees`
+- Admin transaction builders: `buildPause`, `buildUnpause`, `buildSetGuardian`,
+  `buildSetProposalDeposit`, `buildSetProposerCooldown`, `buildAllowTarget`,
+  `buildDisallowTarget`, `buildTransferAdmin`, `buildAcceptAdmin`,
+  `buildCancelAdminTransfer` and `buildUpgrade`
 
 Upgrading from an earlier release? `buildFinalize` and `buildExecute` changed
 signature in 0.2.0. See [MIGRATIONS.md](MIGRATIONS.md).
@@ -124,6 +129,29 @@ signature in 0.2.0. See [MIGRATIONS.md](MIGRATIONS.md).
 through `get_past_votes`. `buildDelegate` and `buildUndelegate` build unsigned
 governance transactions; the holder must authorize even if a different source
 account pays the fee. Self-delegation clears an existing assignment.
+
+### Admin operations
+
+Admin-only methods require the admin's authorization. Each builds and returns
+unsigned XDR for the caller to sign with Freighter:
+
+```typescript
+const pauseXdr = await client.buildPause(adminAddress);
+const setGuardianXdr = await client.buildSetGuardian(adminAddress, newGuardianAddress);
+const allowXdr = await client.buildAllowTarget(adminAddress, targetAddress);
+const upgradeXdr = await client.buildUpgrade(adminAddress, wasmHash);
+```
+
+Available admin builders:
+- `buildPause(admin)` and `buildUnpause(admin)` — pause/resume contract operations
+- `buildSetGuardian(admin, newGuardian)` — change the veto authority
+- `buildSetProposalDeposit(admin, amount)` — update proposal deposit amount
+- `buildSetProposerCooldown(admin, ledgers)` — update proposal cooldown period
+- `buildAllowTarget(admin, target)` and `buildDisallowTarget(admin, target)` — manage action allowlist
+- `buildTransferAdmin(admin, newAdmin)` — initiate admin transfer
+- `buildAcceptAdmin(pendingAdmin)` — accept a pending admin transfer
+- `buildCancelAdminTransfer(admin)` — cancel a pending transfer
+- `buildUpgrade(admin, wasmHash)` — replace the governance contract WASM
 
 ## Contract errors
 
