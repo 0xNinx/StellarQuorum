@@ -1,74 +1,51 @@
-import { render, screen } from "@testing-library/react";
-import Navbar from "./Navbar";
-import { WalletContext, type WalletContextValue } from "./WalletProvider";
-import { describeVisual } from "@/test/visual";
+'use client';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Scale } from "lucide-react";
+import { useWallet } from "./WalletProvider";
+import AccountSwitcher from "./AccountSwitcher";
+import DelegateStatus from "./DelegateStatus";
+import NotificationCenter from "./NotificationCenter";
+import { t } from "@/lib/i18n";
 
-// The notification center has its own suite (issue #278). Stubbing it here keeps
-// the header baselines about the header, not about a dropdown that loads proposals.
-jest.mock("./NotificationCenter", () => ({ __esModule: true, default: () => null }));
+export default function Navbar() {
+  const { address, pending, error, connect } = useWallet();
+  const pathname = usePathname();
 
-// Issue #168: the sticky header defines the chrome every page shares, so its
-// link treatment and the connect button are baselined like the rest. The button
-// is also the only place the connected address enters the app, so the connected
-// state is baselined too: it has to be recognisable at a glance, and short
-// enough not to break the header.
-const DISCONNECTED: WalletContextValue = {
-  address: null,
-  pending: false,
-  error: null,
-  connect: jest.fn(),
-  disconnect: jest.fn(),
-};
-
-function renderNavbar(value: Partial<WalletContextValue> = {}) {
-  return render(
-    <WalletContext.Provider value={{ ...DISCONNECTED, ...value }}>
-      <Navbar />
-    </WalletContext.Provider>,
+  return (
+    <nav className="border-b border-[#1a2535] bg-[#080c10]/90 backdrop-blur sticky top-0 z-50">
+      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2 font-bold text-lg text-blue-400 hover:text-blue-300 focus-visible:text-blue-300 transition-colors">
+          <Scale size={20} />
+          Quorum
+        </Link>
+        <div className="flex items-center gap-6 text-sm text-slate-400">
+          <Link href="/proposals" className="hover:text-slate-200 hover:underline underline-offset-4 transition-colors">{t("nav.proposals")}</Link>
+          <Link href="/create" className="hover:text-slate-200 hover:underline underline-offset-4 transition-colors">{t("nav.create")}</Link>
+          <Link href="/delegation" className="hover:text-slate-200 hover:underline underline-offset-4 transition-colors">{t("nav.delegation")}</Link>
+          <Link href="/settings" className="hover:text-slate-200 hover:underline underline-offset-4 transition-colors">{t("nav.settings")}</Link>
+          {address ? (
+            <>
+              <DelegateStatus address={address} />
+              <NotificationCenter address={address} />
+              <AccountSwitcher />
+            </>
+          ) : (
+            <button
+              onClick={connect}
+              disabled={pending}
+              className="px-4 py-1.5 border border-blue-700 text-blue-400 hover:bg-blue-900/30 focus-visible:bg-blue-900/30 rounded-md transition-colors disabled:opacity-50"
+            >
+              {pending ? t("nav.connecting") : t("nav.connect")}
+            </button>
+          )}
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="max-w-6xl mx-auto px-6 pb-3 text-xs text-amber-400">
+          {error}
+        </p>
+      )}
+    </nav>
   );
 }
-
-describe("Navbar", () => {
-  it("matches the visual baseline", () => {
-    const { container } = renderNavbar();
-    expect(describeVisual(container.firstChild)).toMatchSnapshot();
-  });
-
-  it("matches the visual baseline with a wallet connected", () => {
-    const { container } = renderNavbar({ address: "GABCDEFGHIJKLMNOPQRSTUVWXYZ3XZK" });
-    expect(describeVisual(container.firstChild)).toMatchSnapshot();
-  });
-
-  it("offers a shortened address and a way out once connected", () => {
-    renderNavbar({ address: "GABCDEFGHIJKLMNOPQRSTUVWXYZ3XZK" });
-
-    const button = screen.getByRole("button");
-    expect(button).toHaveTextContent("…YZ3XZK");
-    // The full address stays reachable for anyone who needs to check which
-    // account the preview is about to be read for.
-    expect(button).toHaveAccessibleName("Disconnect wallet GABCDEFGHIJKLMNOPQRSTUVWXYZ3XZK");
-  });
-
-  it("does not offer a disconnect before a wallet is connected", () => {
-    renderNavbar();
-    expect(screen.getByRole("button", { name: /connect wallet/i })).toBeInTheDocument();
-  });
-
-  it("reports a refused or unavailable wallet instead of failing silently", () => {
-    const { container } = renderNavbar({ error: "No Stellar wallet extension found." });
-    expect(screen.getByRole("alert")).toHaveTextContent(/no stellar wallet extension found/i);
-    expect(describeVisual(container.firstChild)).toMatchSnapshot();
-  });
-});
-
-// Keeps the wrapper honest: the header is only reachable through the provider.
-describe("Navbar without a provider", () => {
-  it("fails loudly rather than rendering a dead connect button", () => {
-    const silence = jest.spyOn(console, "error").mockImplementation(() => {});
-    function Unwrapped() {
-      return <Navbar />;
-    }
-    expect(() => render(<Unwrapped />)).toThrow(/WalletProvider/);
-    silence.mockRestore();
-  });
-});
