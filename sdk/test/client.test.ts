@@ -331,3 +331,75 @@ describe('transaction builders', () => {
     }
   });
 });
+
+describe('governance and token history views', () => {
+  const otherProposal = structVal({ ...proposalFields, id: nativeToScVal(8n, { type: 'u64' }), status: enumVariant('Passed') });
+
+  it('get_proposals_by_proposer(proposer: Address) decodes every proposal in order', async () => {
+    returns(xdr.ScVal.scvVec([proposalVal, otherProposal]));
+    const proposals = await client.getProposalsByProposer(VOTER);
+
+    expect(callAddress()).toBe(CONTRACT);
+    const { method, args } = lastCall();
+    expect(method).toBe('get_proposals_by_proposer');
+    expect(args.map(a => a.type)).toEqual(['scvAddress']);
+    expect(Address.fromScVal(args[0]).toString()).toBe(VOTER);
+    expect(proposals.map(p => [p.id, p.status])).toEqual([[7n, 'Active'], [8n, 'Passed']]);
+    expect(proposals[0]).toEqual({
+      id: 7n, proposer: VOTER, title: 'Raise quorum', description: 'Details',
+      forVotes: 100n, againstVotes: 20n, abstainVotes: 5n,
+      snapshotLedger: 999, startLedger: 1000, endLedger: 2000, queueLedger: 0,
+      quorumRequired: 50n, status: 'Active',
+    });
+  });
+
+  it('get_proposals_by_proposer returns an empty list for a proposer with no proposals', async () => {
+    returns(xdr.ScVal.scvVec([]));
+    expect(await client.getProposalsByProposer(VOTER)).toEqual([]);
+    expect(lastCall().method).toBe('get_proposals_by_proposer');
+  });
+
+  it('get_proposals_by_proposer reuses the read cache per proposer', async () => {
+    const scoped = new QuorumClient({
+      ...TESTNET,
+      governanceContractId: CONTRACT,
+      tokenContractId: TOKEN,
+      cache: { enabled: true },
+    } as QuorumClientConfig);
+
+    returns(xdr.ScVal.scvVec([proposalVal]));
+    expect(await scoped.getProposalsByProposer(VOTER)).toHaveLength(1);
+    expect(await scoped.getProposalsByProposer(VOTER)).toHaveLength(1);
+    expect(simulate).toHaveBeenCalledTimes(1);
+  });
+
+  it('get_past_total_supply(ledger: u32) reads the token contract at that ledger', async () => {
+    returns(nativeToScVal(5000n, { type: 'i128' }));
+    expect(await client.getPastTotalSupply(999)).toBe(5000n);
+
+    expect(callAddress()).toBe(CONTRACT);
+    const { method, args } = lastCall();
+    expect(method).toBe('get_past_total_supply');
+    expect(args.map(a => a.type)).toEqual(['scvU32']);
+    expect(scValToNative(args[0])).toBe(999);
+  });
+
+  it('get_past_total_supply is cached per ledger', async () => {
+    const scoped = new QuorumClient({
+      ...TESTNET,
+      governanceContractId: CONTRACT,
+      tokenContractId: TOKEN,
+      cache: { enabled: true },
+    } as QuorumClientConfig);
+
+    returns(nativeToScVal(5000n, { type: 'i128' }));
+    expect(await scoped.getPastTotalSupply(999)).toBe(5000n);
+    expect(await scoped.getPastTotalSupply(999)).toBe(5000n);
+    expect(simulate).toHaveBeenCalledTimes(1);
+
+    returns(nativeToScVal(6000n, { type: 'i128' }));
+    expect(await scoped.getPastTotalSupply(1000)).toBe(6000n);
+    expect(simulate).toHaveBeenCalledTimes(2);
+    expect(scValToNative(lastCall().args[0])).toBe(1000);
+  });
+});
