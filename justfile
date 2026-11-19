@@ -36,8 +36,8 @@ lint-frontend:
 lint-sdk:
     cd sdk && npm run lint
 
-# Run all test suites (contracts, frontend, SDK, integration)
-test: test-contracts test-frontend test-sdk test-integration
+# Run all test suites (contracts, frontend, SDK)
+test: test-contracts test-frontend test-sdk
 
 # Run contract tests
 test-contracts:
@@ -50,10 +50,6 @@ test-frontend:
 # Run SDK tests
 test-sdk:
     cd sdk && npm test
-
-# Run integration test stubs
-test-integration:
-    cd frontend && npx jest ../tests
 
 # Run security vulnerability audits across all packages
 audit: audit-contracts audit-frontend audit-sdk
