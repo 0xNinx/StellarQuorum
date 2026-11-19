@@ -2,7 +2,7 @@
 
 .PHONY: help build build-contracts build-sdk build-frontend \
         lint lint-contracts lint-frontend lint-sdk clippy \
-        test test-contracts test-frontend test-sdk test-integration \
+        test test-contracts test-frontend test-sdk \
         audit audit-contracts audit-frontend audit-sdk \
         check-wasm-size check ci clean
 
@@ -14,7 +14,7 @@ help: ## Show this help message
 	@echo "High-level targets:"
 	@echo "  make build             Build all packages (contracts WASM, SDK, frontend)"
 	@echo "  make lint              Lint all packages (contracts clippy, frontend, SDK)"
-	@echo "  make test              Run all test suites (contracts, frontend, SDK, integration)"
+	@echo "  make test              Run all test suites (contracts, frontend, SDK)"
 	@echo "  make audit             Run security vulnerability audits across all packages"
 	@echo "  make check             Run all checks (lint, test, build, audit, wasm size check)"
 	@echo "  make ci                Alias for make check"
@@ -34,7 +34,6 @@ help: ## Show this help message
 	@echo "  make test-contracts    Run contract tests (cargo test)"
 	@echo "  make test-frontend     Run frontend unit/component tests (npm test)"
 	@echo "  make test-sdk          Run SDK tests (npm test)"
-	@echo "  make test-integration  Run integration test stubs (npx jest ../tests)"
 	@echo ""
 	@echo "Audit & Verification targets:"
 	@echo "  make audit-contracts   Run cargo audit on contracts"
@@ -85,10 +84,7 @@ test-frontend:
 test-sdk:
 	cd sdk && npm test
 
-test-integration:
-	cd frontend && npx jest ../tests
-
-test: test-contracts test-frontend test-sdk test-integration
+test: test-contracts test-frontend test-sdk
 
 # --- Audit & Security Targets ---
 

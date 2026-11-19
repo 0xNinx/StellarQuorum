@@ -320,6 +320,22 @@ export class QuorumClient {
     return proposals.filter(Boolean) as Proposal[];
   }
 
+  /**
+   * Every proposal created by `proposer`, oldest first.
+   *
+   * The contract view takes no pagination arguments: it reads the proposer's
+   * index and returns the full list in one simulation, so no offset or limit
+   * is offered here. Proposals missing from storage are skipped on-chain.
+   *
+   * @param proposer Stellar address of the proposer.
+   */
+  async getProposalsByProposer(proposer: string, options?: ReadOptions): Promise<Proposal[]> {
+    return this.cache.read('getProposalsByProposer', [proposer], options, async () => {
+      const raw = await this.simulate<RawProposal[]>('get_proposals_by_proposer', new Address(proposer).toScVal());
+      return raw.map(decodeProposal);
+    });
+  }
+
   // ─── Token reads (issue #117) ────────────────────────────────────────────
   // All reads go through the same `simulateTransaction` path as governance
   // reads — nothing is signed or submitted, so they cost no fee.
@@ -369,6 +385,19 @@ export class QuorumClient {
    */
   async totalSupply(options?: ReadOptions): Promise<bigint> {
     return this.cache.read('totalSupply', [], options, () => this.simulateToken<bigint>('total_supply'));
+  }
+
+  /**
+   * Total QUORUM supply as of the end of `ledger`.
+   *
+   * Supply history is never pruned, so this answers for closed proposals too.
+   * Returns 0 for a ledger before the token was initialized.
+   */
+  async getPastTotalSupply(ledger: number, options?: ReadOptions): Promise<bigint> {
+    return this.cache.read('getPastTotalSupply', [ledger], options, () => this.simulateToken<bigint>(
+      'get_past_total_supply',
+      nativeToScVal(ledger, { type: 'u32' }),
+    ));
   }
 
   // ─── Internals ───────────────────────────────────────────────────────────

@@ -210,6 +210,24 @@
       "returns": "Promise<Proposal[]>"
     },
     {
+      "name": "getProposalsByProposer",
+      "parameters": [
+        {
+          "name": "proposer",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<Proposal[]>"
+    },
+    {
       "name": "getProposals",
       "parameters": [
         {
@@ -302,6 +320,24 @@
     {
       "name": "totalSupply",
       "parameters": [
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<bigint>"
+    },
+    {
+      "name": "getPastTotalSupply",
+      "parameters": [
+        {
+          "name": "ledger",
+          "type": "number",
+          "optional": false,
+          "rest": false
+        },
         {
           "name": "options",
           "type": "ReadOptions",

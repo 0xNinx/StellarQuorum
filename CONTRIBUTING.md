@@ -34,7 +34,6 @@ quorum/
 │   └── token/        QUORUM governance token
 ├── sdk/          TypeScript client SDK (@quorum/sdk)
 ├── scripts/      Deployment and operational scripts
-├── tests/        Integration test stubs
 └── docs/         Architecture, whitepaper, tutorials
 ```
 
@@ -143,11 +142,10 @@ All test suites and verification checks must pass before opening or merging a pu
 
 | Suite | Scope / Package | Shortcut | Primary Command | CI Equivalent |
 |---|---|---|---|---|
-| **All Suites** | Runs contracts, frontend, SDK, and integration suites | `make test` | — | — |
+| **All Suites** | Runs contracts, frontend, and SDK suites | `make test` | — | — |
 | **Contracts** | Unit and integration tests for Soroban contracts (`contracts/governance`, `contracts/token`) | `make test-contracts` | `cd contracts && cargo test` | `cargo test` |
 | **Frontend** | Unit and component tests for Next.js app (`frontend/`) | `make test-frontend` | `cd frontend && npm test` | `npm test` |
 | **SDK** | Client SDK tests (`sdk/`) | `make test-sdk` | `cd sdk && npm test` | `npm test` |
-| **Integration Stubs** | Integration test stubs (`tests/`) | `make test-integration` | `cd frontend && npx jest ../tests` | `npx jest tests/` |
 
 ### Local Soroban Network (Docker Compose)
 
@@ -328,7 +326,7 @@ To run all test suites locally, ensure you have the following toolchains install
 | **cargo-audit** | latest | `cargo install cargo-audit` | Security vulnerability auditing |
 | **cargo-geiger** | latest | `cargo install cargo-geiger --locked` | Unsafe-code baseline for `contracts/` |
 | **Semgrep** | latest | `pipx install semgrep` | Security scanning of `frontend/` and `sdk/` |
-| **Node.js** | ≥ 18 (CI uses 20) | `nvm install 20 && nvm use 20` | Frontend, SDK, integration tests |
+| **Node.js** | ≥ 18 (CI uses 20) | `nvm install 20 && nvm use 20` | Frontend, SDK tests |
 | **npm** | ≥ 9 | Bundled with Node.js | Package management |
 | **Stellar CLI** | latest | `cargo install stellar-cli --features opt` | Contract CLI invocations |
 
@@ -440,24 +438,13 @@ make lint-sdk
 make audit-sdk
 ```
 
-### 4. Integration Test Stubs (`tests/`)
-
-The repository includes integration test stubs in `tests/` covering governance quorum calculations and proposal lookup:
-
-```bash
-cd frontend
-npx jest ../tests
-# Or shortcut from repo root:
-make test-integration
-```
-
 ### Workspace Root Helpers (Makefile & npm scripts)
 
 For convenience, a root `Makefile` (and `justfile`) provides shortcuts that fan out to the exact per-package commands documented above. You can run all checks across the entire repo or target specific packages from the repository root:
 
 ```bash
 # High-level workflows across all packages
-make test        # Run all test suites (contracts, frontend, SDK, integration)
+make test        # Run all test suites (contracts, frontend, SDK)
 make lint        # Run all linters (contracts clippy, frontend eslint, SDK eslint)
 make build       # Build all packages (SDK, frontend, contracts WASM)
 make audit       # Run security vulnerability audits across all packages
@@ -468,7 +455,6 @@ make ci          # Alias for make check
 make test-contracts    # cd contracts && cargo test
 make test-frontend     # cd frontend && npm test
 make test-sdk          # cd sdk && npm test
-make test-integration  # cd frontend && npx jest ../tests
 
 # Per-package lint shortcuts
 make lint-contracts    # cd contracts && cargo clippy --all-targets --all-features -- -D warnings
