@@ -51,7 +51,8 @@ export interface QuorumClientConfig {
 export type ReadMethod =
   | 'getProposal' | 'getProposalCount' | 'getConfig' | 'getVote'
   | 'getLatestLedger' | 'getVotingPower' | 'getBalance' | 'getTokenDecimals'
-  | 'balance' | 'getPastBalance' | 'allowance' | 'totalSupply';
+  | 'balance' | 'getPastBalance' | 'allowance' | 'totalSupply'
+  | 'getProposalsByProposer' | 'getPastTotalSupply';
 
 export interface ReadCacheConfig {
   enabled: boolean;
