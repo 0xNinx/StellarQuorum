@@ -286,6 +286,8 @@ If the admin key is lost and cannot be recovered:
 - Token admin: Treasury managers, core team (if minting is needed)
 - Ensure both groups have clear governance processes
 
+**Governance Self-Admin Re-entry Limitation:** Soroban does not allow a contract to call itself while it is already executing. If a proposal action targets the governance contract and attempts to call `set_guardian()` or `accept_admin()`, the re-entry will be rejected at execution time. This means the recommended setup of making the governance contract its own admin cannot work through proposal actions - those actions will fail. Admin changes should be made through the two-step `transfer_admin()` / `accept_admin()` flow instead.
+
 ### Token Minting Considerations
 
 The token admin can mint tokens, which is a powerful economic lever. Consider:
