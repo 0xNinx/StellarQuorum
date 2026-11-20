@@ -25,7 +25,7 @@ The same parameter means very different things depending on distribution shape.
 | `quorum_bps` | 500 | 5% of supply = 5M tokens |
 | `proposal_threshold` | 50,000 tokens | 0.05% of supply |
 | `voting_period` | 17,280 ledgers | ~24 hours |
-| `timelock_period` | 8,640 ledgers | ~12 hours |
+| `timelock_period` | 34,560 ledgers | ~48 hours |
 
 ### Analysis
 
@@ -74,7 +74,7 @@ The proposal fails because opponents outnumber supporters, even though quorum wa
 | `quorum_bps` | 500 | 5% of supply = 5M tokens |
 | `proposal_threshold` | 50,000 tokens | 0.05% of supply |
 | `voting_period` | 17,280 ledgers | ~24 hours |
-| `timelock_period` | 8,640 ledgers | ~12 hours |
+| `timelock_period` | 34,560 ledgers | ~48 hours |
 
 ### Analysis
 
@@ -220,7 +220,7 @@ Voting power = tokens × time_held
 quorum_bps = 500               (5% quorum)
 proposal_threshold = 500_000   (0.5% — accessible but not spam-prone)
 voting_period = 17_280         (24 hours)
-timelock_period = 8_640        (12 hours)
+timelock_period = 34_560        (48 hours)
 ```
 
 **Rationale:** A diverse community can reach quorum; parameter thresholds don't need to be high because capture is already difficult.
@@ -232,7 +232,7 @@ timelock_period = 8_640        (12 hours)
 quorum_bps = 750               (7.5% quorum — harder to reach)
 proposal_threshold = 500_000   (0.5% — same as broad)
 voting_period = 34_560         (48 hours — extra time to organize)
-timelock_period = 8_640        (12 hours)
+timelock_period = 34_560        (48 hours)
 ```
 
 **Rationale:** Higher quorum forces broader coalitions; longer voting lets small holders coordinate.
@@ -244,7 +244,7 @@ timelock_period = 8_640        (12 hours)
 quorum_bps = 1_500             (15% quorum — very hard to reach unilaterally)
 proposal_threshold = 100_000   (0.1% — lower to encourage more ideas)
 voting_period = 51_840         (72 hours — extensive time for coordination)
-timelock_period = 17_280       (24 hours — guardian has more time to review)
+timelock_period = 51_840       (72 hours — guardian has more time to review)
 ```
 
 **Rationale:** Force even the largest holder to build a real coalition; enable small holders to organize; guardian veto is more critical.

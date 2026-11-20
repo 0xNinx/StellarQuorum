@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide walks through deploying the Quorum governance contracts to Stellar testnet or mainnet.
+This guide walks through deploying the Quorum governance contracts to Stellar testnet, mainnet, or a local network.
 
 ## Prerequisites
 
@@ -13,7 +13,11 @@ This guide walks through deploying the Quorum governance contracts to Stellar te
 
 ```bash
 NETWORK=testnet SOURCE_ACCOUNT=G... bash scripts/deploy.sh
-# optional: GUARDIAN=G... EXECUTION_GRACE_PERIOD=17280
+# optional overrides:
+# GUARDIAN=G... EXECUTION_GRACE_PERIOD=17280 VOTING_PERIOD=17280 \
+# TIMELOCK_PERIOD=34560 QUORUM_BPS=500 PROPOSAL_THRESHOLD=500000000000 \
+# INITIAL_SUPPLY=100000000000000
+# NETWORK=local uses the quickstart RPC and passphrase at localhost:8000.
 ```
 
 The script will:
@@ -41,7 +45,7 @@ Initialized with the following default parameters:
 | `guardian` | `SOURCE_ACCOUNT` (override with `GUARDIAN`) | Address that can veto queued proposals during the timelock |
 | `quorum_bps` | 500 | 5% of circulating supply must vote for quorum |
 | `voting_period` | 17,280 ledgers | ~24 hours (at ~5s/ledger) |
-| `timelock_period` | 8,640 ledgers | ~12 hours |
+| `timelock_period` | 34,560 ledgers | ~48 hours |
 | `execution_grace_period` | 17,280 ledgers | ~24 hours to execute after the timelock before the proposal expires (0 disables expiry) |
 | `proposal_threshold` | 500,000,000,000 | 50,000 QUORUM minimum to create a proposal |
 
@@ -49,7 +53,7 @@ See [governance-parameters.md](./governance-parameters.md) for guidance on choos
 
 ## Initialization Parameters
 
-The `initialize` call takes nine arguments and sets them **once**; the contract has no `update_config()`. Only the proposal deposit, the proposer cooldown and the guardian can be changed later, through their own admin calls. Choose carefully.
+The `initialize` call takes eight arguments and sets them **once**; the contract has no `update_config()`. Only the proposal deposit, the proposer cooldown and the guardian can be changed later, through their own admin calls. Choose carefully.
 
 ```
 --admin <ADDRESS>          The deployer address (can cancel proposals)
@@ -57,10 +61,28 @@ The `initialize` call takes nine arguments and sets them **once**; the contract 
 --token <TOKEN_ID>         The QUORUM token contract address
 --quorum_bps <U32>         Quorum threshold in basis points (e.g. 500 = 5%)
 --voting_period <U32>      Voting window in ledgers (17,280 ≈ 1 day)
---timelock_period <U32>    Timelock delay in ledgers (8,640 ≈ 12 hours)
+--timelock_period <U32>    Timelock delay in ledgers (34,560 ≈ 48 hours)
 --execution_grace_period <U32> Ledgers after the timelock in which execute() must run (0 = no expiry)
 --proposal_threshold <I128> Minimum token balance to create a proposal (in smallest units)
 ```
+
+### Deploy Script Configuration
+
+`scripts/deploy.sh` reads these variables; unset values use the defaults shown:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NETWORK` | `testnet` | `testnet`, `mainnet`, `local`, or `standalone` |
+| `SOURCE_ACCOUNT` | required | Deployer/signer key alias or address |
+| `GUARDIAN` | `SOURCE_ACCOUNT` | Veto key; using the deployer emits a warning |
+| `INITIAL_SUPPLY` | `100000000000000` | Initial token supply in stroops |
+| `QUORUM_BPS` | `500` | Quorum threshold in basis points |
+| `VOTING_PERIOD` | `17280` | Voting window in ledgers (~24 hours) |
+| `TIMELOCK_PERIOD` | `34560` | Timelock in ledgers (~48 hours) |
+| `EXECUTION_GRACE_PERIOD` | `17280` | Execution window after the timelock |
+| `PROPOSAL_THRESHOLD` | `500000000000` | Proposal deposit in stroops |
+| `RPC_URL` / `PASSPHRASE` | network defaults | Custom RPC endpoint and passphrase |
+| `DEPLOY_OUTPUT` | unset | JSON file for the deployed contract IDs |
 
 ## Post-Deployment Verification
 

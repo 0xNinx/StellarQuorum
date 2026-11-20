@@ -110,6 +110,25 @@ describe("loadEnv", () => {
     expect(env.tokenContractId).toBeNull();
   });
 
+  it("warns about legacy contract variables without using them", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const env = loadEnv(
+        deployment({
+          legacyGovernanceContractId: TOKEN,
+          legacyTokenContractId: GOVERNANCE,
+        }),
+      );
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/deprecated/));
+      expect(env.governanceContractId).toBe(GOVERNANCE);
+      expect(env.tokenContractId).toBe(TOKEN);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("strips a trailing slash from the site URL", () => {
     expect(loadEnv(deployment({ siteUrl: "https://quorum.example.com/" })).siteUrl).toBe(
       "https://quorum.example.com",
