@@ -409,6 +409,7 @@ pub enum DataKey {
     ProposalCount,
     Proposal(u64),
     HasVoted(u64, Address),
+    VoteWeight(u64, Address),  // proposal, voter -> weight vote() counted
     Delegate(Address),
     PendingAdmin,
     ProposerIndex(Address, u64), // (proposer, index) -> proposal_id
@@ -551,8 +552,10 @@ impl GovernanceContract {
 
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
         env.storage().persistent().set(&DataKey::HasVoted(proposal_id, voter.clone()), &support);
+        env.storage().persistent().set(&DataKey::VoteWeight(proposal_id, voter.clone()), &voting_power);
         Self::touch_proposal(&env, proposal_id);
         Self::touch_vote(&env, proposal_id, &voter);
+        Self::touch_persistent(&env, &DataKey::VoteWeight(proposal_id, voter.clone()));
         Self::touch_instance(&env);
         Self::update_stats(&env, |stats| {
             stats.votes_cast = stats.votes_cast.saturating_add(1);
@@ -893,6 +896,16 @@ impl GovernanceContract {
     /// can show *how* a wallet voted rather than only whether it did.
     pub fn get_vote(env: Env, proposal_id: u64, voter: Address) -> Option<u32> {
         env.storage().persistent().get(&DataKey::HasVoted(proposal_id, voter))
+    }
+
+    /// The voting weight `vote()` counted for `voter` on `proposal_id`, or
+    /// `None` if they have not voted.
+    ///
+    /// Returns the snapshot weight (balance + stake boost at the proposal's
+    /// snapshot ledger) exactly as it was counted, so clients can display
+    /// "you voted For with 1,200 QUORUM" without re-reading the checkpoint.
+    pub fn get_vote_weight(env: Env, proposal_id: u64, voter: Address) -> Option<i128> {
+        env.storage().persistent().get(&DataKey::VoteWeight(proposal_id, voter))
     }
 
     pub fn get_config(env: Env) -> Config {
