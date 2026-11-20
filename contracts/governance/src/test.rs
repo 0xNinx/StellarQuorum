@@ -1675,6 +1675,30 @@ fn cancelling_emits_proposal_cancelled_with_the_caller() {
 }
 
 #[test]
+fn marking_expired_emits_proposal_expired() {
+    let env = Env::default();
+    let grace_period = 1000u32;
+    let (admin, _, governance_id) = deploy_full(&env, 1_000_000, QUORUM_BPS, 0, grace_period);
+    let governance = GovernanceContractClient::new(&env, &governance_id);
+    let proposal_id = propose(&env, &governance_id, &admin).id;
+    queue_proposal(&env, &governance, &admin, proposal_id);
+    let queue_ledger = governance.get_proposal(&proposal_id).queue_ledger;
+    env.ledger().set_sequence_number(queue_ledger + grace_period + 1);
+
+    governance.mark_expired(&proposal_id);
+
+    let (topics, data) = last_governance_event(&env, &governance_id);
+    assert_eq!(
+        topics,
+        (Symbol::new(&env, "proposal_expired"), proposal_id).into_val(&env)
+    );
+    assert_eq!(
+        ProposalExpired::try_from_val(&env, &data).unwrap(),
+        ProposalExpired { id: proposal_id }
+    );
+}
+
+#[test]
 fn vetoing_emits_proposal_vetoed_with_the_reason() {
     let env = Env::default();
     let (admin, governance_id, proposal_id) = open_with_holders(&env, 1_000_000, QUORUM_BPS, &[]);

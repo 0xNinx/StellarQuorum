@@ -102,6 +102,7 @@ const sample: Array<[string, xdr.ScVal, Record<string, unknown>]> = [
     structVal({ id: u64(7n), caller: addr(VOTER) }),
     { type: 'proposal_cancelled', id: 7n, caller: VOTER },
   ],
+  ['proposal_expired', structVal({ id: u64(7n) }), { type: 'proposal_expired', id: 7n }],
   [
     'transfer',
     structVal({ from: addr(VOTER), to: addr(VOTER), amount: i128(10n) }),

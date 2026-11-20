@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import { useLocalStorage } from "@/lib/useLocalStorage";
-import { DEFAULT_SETTINGS, DENSITY_KEY, SETTINGS_KEY, isValidRpcUrl, type Settings } from "@/lib/settings";
+import { DEFAULT_SETTINGS, DENSITY_KEY, SETTINGS_KEY, isRpcUrlAllowedByCsp, isValidRpcUrl, type Settings } from "@/lib/settings";
 
 type Density = "cards" | "compact";
 
@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const [notifyStatusChanges, setNotifyStatusChanges] = useState(DEFAULT_SETTINGS.notifyStatusChanges);
   const [density, setDensity] = useState<Density>("cards");
   const [rpcInvalid, setRpcInvalid] = useState(false);
+  const [rpcBlocked, setRpcBlocked] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
@@ -39,10 +40,12 @@ export default function SettingsPage() {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const valid = isValidRpcUrl(rpcUrl);
-    setRpcInvalid(!valid);
+    const wellFormed = isValidRpcUrl(rpcUrl);
+    const allowed = wellFormed && isRpcUrlAllowedByCsp(rpcUrl);
+    setRpcInvalid(!wellFormed);
+    setRpcBlocked(wellFormed && !allowed);
     setJustSaved(false);
-    if (!valid) return;
+    if (!allowed) return;
 
     store({ rpcUrl: rpcUrl.trim(), notifyStatusChanges });
     try {
@@ -67,12 +70,13 @@ export default function SettingsPage() {
               value={rpcUrl}
               onChange={event => { setRpcUrl(event.target.value); setJustSaved(false); }}
               placeholder="https://"
-              aria-invalid={rpcInvalid}
-              aria-describedby={rpcInvalid ? "rpc-url-hint rpc-url-error" : "rpc-url-hint"}
-              className={`${inputClass} font-mono text-xs ${rpcInvalid ? "border-red-600 focus:border-red-500" : ""}`}
+              aria-invalid={rpcInvalid || rpcBlocked}
+              aria-describedby={rpcInvalid || rpcBlocked ? "rpc-url-hint rpc-url-error" : "rpc-url-hint"}
+              className={`${inputClass} font-mono text-xs ${rpcInvalid || rpcBlocked ? "border-red-600 focus:border-red-500" : ""}`}
             />
             <p id="rpc-url-hint" className="mt-1.5 text-xs text-slate-500">{t("settings.rpcHint")}</p>
             {rpcInvalid && <p id="rpc-url-error" role="alert" className="mt-1.5 text-xs text-red-400">{t("settings.rpcInvalid")}</p>}
+            {rpcBlocked && <p id="rpc-url-error" role="alert" className="mt-1.5 text-xs text-red-400">{t("settings.rpcBlocked")}</p>}
           </div>
         </fieldset>
 

@@ -391,6 +391,7 @@ topic tuple (a symbol first, then identifiers) and a struct payload.
 | `("proposal_queued", id)` | `ProposalQueued { id, queue_ledger }` | `finalize`, only when the proposal passes, after `proposal_finalized` |
 | `("proposal_executed", id)` | `ProposalExecuted { id }` | `execute` |
 | `("proposal_cancelled", id)` | `ProposalCancelled { id, caller }` | `cancel` |
+| `("proposal_expired", id)` | `ProposalExpired { id }` | `mark_expired` |
 | `("proposal_deposit_updated")` | `ProposalDepositUpdated { amount }` | `set_proposal_deposit` |
 | `("deposit_refunded", id)` | `DepositRefunded { id, proposer, amount }` | `finalize`, when the proposal passes |
 | `("deposit_forfeited", id)` | `DepositForfeited { id, amount }` | `finalize`, when the proposal fails; `cancel` |
