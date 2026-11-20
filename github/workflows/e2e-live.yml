@@ -1,0 +1,159 @@
+name: E2E (live network)
+
+# Nightly end-to-end run against a real Soroban network. The E2E job in ci.yml
+# builds the frontend in fixture mode, so it never exercises contract reads.
+# This job starts the stellar/quickstart network, deploys and seeds the
+# contracts with scripts/seed-demo-proposals.mjs, builds the frontend against
+# them and runs a subset of the Playwright specs. Runtime is documented in
+# frontend/e2e/README.md and recorded in each run's job summary.
+on:
+  schedule:
+    - cron: "30 3 * * *" # 03:30 UTC every night
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-live
+  cancel-in-progress: true
+
+jobs:
+  e2e-live:
+    name: E2E against a seeded quickstart network
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      QUORUM_RPC_URL: http://localhost:8000/soroban/rpc
+      QUORUM_FRIENDBOT_URL: http://localhost:8000/friendbot
+      QUORUM_NETWORK_PASSPHRASE: "Standalone Network ; February 2017"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Start job timer
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      # Same image as docker-compose.yml. The flags are passed explicitly so
+      # the RPC is enabled whatever the image's environment-variable handling.
+      - name: Start the quickstart network
+        run: |
+          docker run -d --name stellar -p 8000:8000 \
+            stellar/quickstart:latest --local --enable core,horizon,rpc
+          echo "NETWORK_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      # Building contracts and installing tools below overlaps with the network
+      # syncing, so the readiness wait comes later.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry, build and installed tools
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+          key: e2e-live-${{ hashFiles('contracts/Cargo.lock') }}
+          cache-on-failure: true
+
+      - name: Build contracts
+        run: cd contracts && cargo build --target wasm32-unknown-unknown --release
+
+      # rust-cache keeps ~/.cargo/bin, so this compiles only on a cold cache.
+      - name: Install Stellar CLI
+        run: command -v stellar || cargo install --locked stellar-cli
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            sdk/package-lock.json
+
+      # The seed script loads @stellar/stellar-sdk from sdk/, and the frontend
+      # imports @quorum/sdk from ../sdk, so the SDK is installed and built first.
+      - name: Build SDK
+        run: cd sdk && npm ci && npm run build
+
+      - name: Wait for the network to be ready
+        run: |
+          for i in $(seq 1 60); do
+            health=$(curl -s -X POST -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' "$QUORUM_RPC_URL" || true)
+            friendbot=$(curl -s -o /dev/null -w '%{http_code}' "$QUORUM_FRIENDBOT_URL" || true)
+            if printf '%s' "$health" | grep -q '"healthy"' && [[ "$friendbot" =~ ^[24] ]]; then
+              echo "Network ready after $(( $(date +%s) - NETWORK_START ))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Quickstart network was not ready after 5 minutes"
+          docker logs --tail 200 stellar
+          exit 1
+
+      - name: Deploy and seed the contracts
+        run: |
+          set -o pipefail
+          node scripts/seed-demo-proposals.mjs | tee seed.log
+          gov=$(grep -oE 'governance contract: C[A-Z2-7]{55}' seed.log | tail -1 | awk '{print $3}')
+          token=$(grep -oE 'token contract: C[A-Z2-7]{55}' seed.log | tail -1 | awk '{print $3}')
+          if [ -z "$gov" ] || [ -z "$token" ]; then
+            echo "::error::Could not read the deployed contract IDs from the seed output"
+            exit 1
+          fi
+          {
+            echo "NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID=$gov"
+            echo "NEXT_PUBLIC_TOKEN_CONTRACT_ID=$token"
+          } >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      # USE_FIXTURE=0 makes the build fail fast instead of silently serving the
+      # bundled fixtures if the contract ID is missing.
+      - name: Build frontend against the seeded contracts
+        env:
+          NEXT_PUBLIC_USE_FIXTURE: "0"
+          NEXT_PUBLIC_STELLAR_RPC_URL: ${{ env.QUORUM_RPC_URL }}
+          NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE: ${{ env.QUORUM_NETWORK_PASSPHRASE }}
+        run: cd frontend && npm run build
+
+      - name: Install Playwright browser
+        run: cd frontend && npx playwright install --with-deps chromium
+
+      # Subset: the live-network spec plus wallet-connect, which does not depend
+      # on fixture data. vote-flow.spec.ts asserts fixture proposals, so it only
+      # runs in the fixture-mode job in ci.yml.
+      - name: Run live-network E2E specs
+        env:
+          QUORUM_E2E_LIVE: "1"
+          NEXT_PUBLIC_USE_FIXTURE: "0"
+          NEXT_PUBLIC_STELLAR_RPC_URL: ${{ env.QUORUM_RPC_URL }}
+          NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE: ${{ env.QUORUM_NETWORK_PASSPHRASE }}
+        run: cd frontend && npx playwright test e2e/live-network.spec.ts e2e/wallet-connect.spec.ts --project=chromium
+
+      - name: Quickstart logs
+        if: failure()
+        run: docker logs --tail 300 stellar
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-live
+          path: frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Report job duration
+        if: always()
+        run: |
+          duration=$(( $(date +%s) - ${JOB_START:-$(date +%s)} ))
+          {
+            echo "### E2E (live network)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| Job duration | $(( duration / 60 ))m $(( duration % 60 ))s |"
+          } >> "$GITHUB_STEP_SUMMARY"

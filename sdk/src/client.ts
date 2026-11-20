@@ -225,6 +225,11 @@ export class QuorumClient {
         timelockPeriod: raw.timelock_period,
         proposalThreshold: raw.proposal_threshold,
         admin: raw.admin,
+        guardian: raw.guardian ?? '',
+        executionGracePeriod: raw.execution_grace_period ?? 0,
+        paused: raw.paused ?? false,
+        proposalDeposit: raw.proposal_deposit ?? BigInt(0),
+        proposerCooldown: raw.proposer_cooldown ?? 0,
       };
     });
   }
@@ -320,6 +325,22 @@ export class QuorumClient {
     return proposals.filter(Boolean) as Proposal[];
   }
 
+  /**
+   * Every proposal created by `proposer`, oldest first.
+   *
+   * The contract view takes no pagination arguments: it reads the proposer's
+   * index and returns the full list in one simulation, so no offset or limit
+   * is offered here. Proposals missing from storage are skipped on-chain.
+   *
+   * @param proposer Stellar address of the proposer.
+   */
+  async getProposalsByProposer(proposer: string, options?: ReadOptions): Promise<Proposal[]> {
+    return this.cache.read('getProposalsByProposer', [proposer], options, async () => {
+      const raw = await this.simulate<RawProposal[]>('get_proposals_by_proposer', new Address(proposer).toScVal());
+      return raw.map(decodeProposal);
+    });
+  }
+
   // ─── Token reads (issue #117) ────────────────────────────────────────────
   // All reads go through the same `simulateTransaction` path as governance
   // reads — nothing is signed or submitted, so they cost no fee.
@@ -369,6 +390,19 @@ export class QuorumClient {
    */
   async totalSupply(options?: ReadOptions): Promise<bigint> {
     return this.cache.read('totalSupply', [], options, () => this.simulateToken<bigint>('total_supply'));
+  }
+
+  /**
+   * Total QUORUM supply as of the end of `ledger`.
+   *
+   * Supply history is never pruned, so this answers for closed proposals too.
+   * Returns 0 for a ledger before the token was initialized.
+   */
+  async getPastTotalSupply(ledger: number, options?: ReadOptions): Promise<bigint> {
+    return this.cache.read('getPastTotalSupply', [ledger], options, () => this.simulateToken<bigint>(
+      'get_past_total_supply',
+      nativeToScVal(ledger, { type: 'u32' }),
+    ));
   }
 
   // ─── Internals ───────────────────────────────────────────────────────────
@@ -964,6 +998,9 @@ interface RawProposal {
   queue_ledger: number;
   quorum_required: bigint;
   status: [string];
+  timelock_period?: number;
+  metadata_uri?: string;
+  kind?: [string];
 }
 
 interface RawConfig {
@@ -973,6 +1010,11 @@ interface RawConfig {
   timelock_period: number;
   proposal_threshold: bigint;
   admin: string;
+  guardian?: string;
+  execution_grace_period?: number;
+  paused?: boolean;
+  proposal_deposit?: bigint;
+  proposer_cooldown?: number;
 }
 
 interface RawGovernanceStats {
@@ -1001,11 +1043,15 @@ function decodeProposal(raw: RawProposal): Proposal {
     queueLedger: raw.queue_ledger,
     quorumRequired: raw.quorum_required,
     status: decodeStatus(raw.status),
+    timelockPeriod: raw.timelock_period ?? 0,
+    metadataUri: raw.metadata_uri,
+    kind: raw.kind ? (raw.kind[0] as 'Standard' | 'Upgrade') : 'Standard',
   };
 }
 
+/** On-chain statuses the contract can store on a Proposal. */
 const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
-  'Pending', 'Active', 'Passed', 'Failed', 'Queued', 'Executed', 'Cancelled',
+  'Active', 'Failed', 'Queued', 'Executed', 'Cancelled', 'Expired', 'Vetoed',
 ];
 
 /** Unit enum variant `[name]` → ProposalStatus, rejecting names the SDK does not know. */

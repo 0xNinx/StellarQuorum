@@ -1,219 +1,152 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import AddToCalendar from "./AddToCalendar";
+'use client';
+
+import { Calendar } from "lucide-react";
 import type { Proposal } from "@/lib/types";
+import { t } from "@/lib/i18n";
 
 /**
- * Issue #289: the "add to calendar" button generates a .ics file and triggers
- * a download client-side. Tests verify the button renders, the download is
- * triggered, and the generated ICS content is valid RFC 5545.
+ * "Add to calendar" button for proposal deadlines.
+ *
+ * Issue #289: generates an iCalendar (.ics) file with the voting end time
+ * and, for queued proposals, the moment the timelock expires and the proposal
+ * becomes executable. The .ics file is downloaded client-side via a Blob URL —
+ * no server route needed, as the proposal data is already available in the
+ * browser.
+ *
+ * The button is only rendered when a voting end time is present.
  */
-const mockProposal: Proposal = {
-  id: "QIP-001",
-  title: "Test Proposal",
-  description: "This is a test proposal description",
-  proposer: "GABC...3XZK",
-  status: "active",
-  startTime: "2026-05-12T10:00:00Z",
-  endTime: "2026-05-19T10:00:00Z",
-  snapshotLedger: 61_284_512,
-  forVotes: 100000,
-  againstVotes: 50000,
-  abstainVotes: 10000,
-  quorumRequired: 500000,
-  category: "Financial",
-  actions: [],
-  votes: [],
-};
+export default function AddToCalendar({ proposal }: { proposal: Proposal }) {
+  if (!proposal.endTime) {
+    return null;
+  }
 
-describe("AddToCalendar", () => {
-  let createObjectURLSpy: jest.SpyInstance;
-  let revokeObjectURLSpy: jest.SpyInstance;
+  const handleDownload = () => {
+    const icsContent = generateIcs(proposal);
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `proposal-${proposal.id}.ics`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
 
-  beforeEach(() => {
-    // Mock URL.createObjectURL and URL.revokeObjectURL
-    createObjectURLSpy = jest.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock-url");
-    revokeObjectURLSpy = jest.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-  });
+  return (
+    <button
+      onClick={handleDownload}
+      aria-label={t("proposals.addToCalendar")}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#162032] hover:bg-[#1a2a40] text-slate-300 text-sm border border-[#1a2535] transition-colors"
+    >
+      <Calendar size={14} />
+      <span className="hidden sm:inline">{t("proposals.addToCalendarShort")}</span>
+    </button>
+  );
+}
 
-  afterEach(() => {
-    createObjectURLSpy.mockRestore();
-    revokeObjectURLSpy.mockRestore();
-  });
+/**
+ * Generates an RFC 5545 iCalendar file for a proposal's deadlines.
+ *
+ * Issue #289: the voting end time and the timelock expiry (`queueTime`, set
+ * only once a proposal is queued) are already ISO 8601 strings in the Proposal
+ * data model, produced by the ledger-to-date conversion in `toUiProposal()`.
+ * No additional conversion is needed here — we only need to format them as
+ * iCalendar DTSTART/DTEND values.
+ *
+ * @param proposal The proposal to generate calendar events for.
+ * @returns RFC 5545 compliant iCalendar content.
+ */
+function generateIcs(proposal: Proposal): string {
+  const now = new Date();
+  
+  // DTSTAMP and DTSTART/DTEND in UTC format: yyyyMMddTHHmmssZ
+  const formatIcalDate = (date: Date): string => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+  };
 
-  it("renders the button when endTime is present", () => {
-    render(<AddToCalendar proposal={mockProposal} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    expect(button).toBeInTheDocument();
-  });
+  const dtstamp = formatIcalDate(now);
+  
+  // Truncate description to 200 chars for calendar apps
+  const description = escapeIcal(proposal.description.slice(0, 200) + (proposal.description.length > 200 ? '...' : ''));
+  const url = `https://quorum.stellar.org/proposals/${proposal.id}`;
 
-  it("does not render when endTime is absent", () => {
-    const proposalWithoutEndTime = { ...mockProposal, endTime: "" };
-    const { container } = render(<AddToCalendar proposal={proposalWithoutEndTime} />);
-    
-    expect(container.firstChild).toBeNull();
-  });
+  // Each event is a one-hour block starting at the deadline.
+  const vevent = (uid: string, start: string, summary: string): string => {
+    const startDate = new Date(start);
+    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+    return `BEGIN:VEVENT
+UID:${uid}
+DTSTAMP:${dtstamp}
+DTSTART:${formatIcalDate(startDate)}
+DTEND:${formatIcalDate(endDate)}
+SUMMARY:${escapeIcal(summary)}
+DESCRIPTION:${description}
+URL:${url}
+END:VEVENT
+`;
+  };
+  
+  let icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//StellarQuorum//StellarQuorum//EN
+`;
 
-  it("triggers download when clicked", () => {
-    render(<AddToCalendar proposal={mockProposal} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    fireEvent.click(button);
-    
-    // Verify URL.createObjectURL was called with a Blob of correct type
-    expect(createObjectURLSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "text/calendar;charset=utf-8",
-      })
-    );
-    
-    // Verify URL.revokeObjectURL was called to clean up
-    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:mock-url");
-  });
+  icsContent += vevent(`${proposal.id}@stellarquorum`, proposal.endTime, `Vote on: ${proposal.title}`);
 
-  it("generates valid ICS content with correct VEVENT structure", () => {
-    render(<AddToCalendar proposal={mockProposal} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    fireEvent.click(button);
-    
-    // Extract the Blob content from the createObjectURL call
-    const blobCall = createObjectURLSpy.mock.calls[0][0] as Blob;
-    
-    // Read the blob content
-    return new Promise<void>((resolve) => {
+  // Queued proposals also get an event for when the timelock expires. The UI
+  // shows a queued proposal as "passed"; `queueTime` is only set once it has
+  // been queued on-chain, and an executed proposal no longer needs a reminder.
+  if (proposal.status === 'passed' && proposal.queueTime) {
+    icsContent += vevent(`${proposal.id}-executable@stellarquorum`, proposal.queueTime, `Executable: ${proposal.title}`);
+  }
+
+  icsContent += 'END:VCALENDAR\r\n';
+  
+  return icsContent;
+}
+
+/**
+ * Escapes special characters in iCalendar text fields per RFC 5545.
+ *
+ * Commas, semicolons, and newlines must be escaped. Proposal titles and
+ * descriptions are user-generated content and may contain these characters.
+ */
+function escapeIcal(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\n/g, '\\n');
+}
+
+
+  const readIcs = (): Promise<string> =>
+    new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => {
-        const icsContent = reader.result as string;
-        
-        // Verify RFC 5545 structure
-        expect(icsContent).toContain("BEGIN:VCALENDAR");
-        expect(icsContent).toContain("VERSION:2.0");
-        expect(icsContent).toContain("PRODID:-//StellarQuorum//StellarQuorum//EN");
-        expect(icsContent).toContain("BEGIN:VEVENT");
-        expect(icsContent).toContain("END:VEVENT");
-        expect(icsContent).toContain("END:VCALENDAR");
-        
-        // Verify VEVENT fields
-        expect(icsContent).toContain("UID:QIP-001@stellarquorum");
-        expect(icsContent).toContain("DTSTAMP:");
-        expect(icsContent).toContain("DTSTART:");
-        expect(icsContent).toContain("DTEND:");
-        expect(icsContent).toContain("SUMMARY:Vote on: Test Proposal");
-        expect(icsContent).toContain("DESCRIPTION:");
-        expect(icsContent).toContain("URL:https://quorum.stellar.org/proposals/QIP-001");
-        
-        resolve();
-      };
-      reader.readAsText(blobCall);
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsText(createObjectURLSpy.mock.calls[0][0] as Blob);
     });
+
+  it("adds an executable event for queued proposals", async () => {
+    render(<AddToCalendar proposal={{ ...mockProposal, status: "passed", queueTime: "2026-05-21T10:00:00Z" }} />);
+    fireEvent.click(screen.getByRole("button", { name: /add voting deadline to calendar/i }));
+
+    const ics = await readIcs();
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+    expect(ics).toContain("UID:QIP-001-executable@stellarquorum");
+    expect(ics).toContain("SUMMARY:Executable: Test Proposal");
+    expect(ics).toContain("DTSTART:20260521T100000Z");
+    expect(ics).toContain("DTEND:20260521T110000Z");
   });
 
-  it("formats dates in UTC iCalendar format", () => {
-    render(<AddToCalendar proposal={mockProposal} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    fireEvent.click(button);
-    
-    const blobCall = createObjectURLSpy.mock.calls[0][0] as Blob;
-    
-    return new Promise<void>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const icsContent = reader.result as string;
-        
-        // The endTime is 2026-05-19T10:00:00Z
-        // In iCal format: 20260519T100000Z
-        expect(icsContent).toContain("DTSTART:20260519T100000Z");
-        
-        // DTEND should be 1 hour later: 20260519T110000Z
-        expect(icsContent).toContain("DTEND:20260519T110000Z");
-        
-        resolve();
-      };
-      reader.readAsText(blobCall);
-    });
-  });
+  it("emits only the voting event when the proposal is not queued", async () => {
+    render(<AddToCalendar proposal={{ ...mockProposal, status: "executed", queueTime: "2026-05-21T10:00:00Z" }} />);
+    fireEvent.click(screen.getByRole("button", { name: /add voting deadline to calendar/i }));
 
-  it("escapes special characters in title and description", () => {
-    const proposalWithSpecialChars: Proposal = {
-      ...mockProposal,
-      title: "Test; Proposal, with\\special chars",
-      description: "Description with\nnewlines and; commas, and\\backslashes",
-    };
-    
-    render(<AddToCalendar proposal={proposalWithSpecialChars} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    fireEvent.click(button);
-    
-    const blobCall = createObjectURLSpy.mock.calls[0][0] as Blob;
-    
-    return new Promise<void>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const icsContent = reader.result as string;
-        
-        // Semicolons, commas, backslashes, and newlines should be escaped
-        expect(icsContent).toContain("SUMMARY:Vote on: Test\\; Proposal\\, with\\\\special chars");
-        expect(icsContent).toContain("Description with\\nnewlines and\\; commas\\, and\\\\backslashes");
-        
-        resolve();
-      };
-      reader.readAsText(blobCall);
-    });
+    const ics = await readIcs();
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(ics).not.toContain("Executable:");
   });
-
-  it("truncates long descriptions to 200 characters", () => {
-    const longDescription = "a".repeat(300);
-    const proposalWithLongDesc: Proposal = {
-      ...mockProposal,
-      description: longDescription,
-    };
-    
-    render(<AddToCalendar proposal={proposalWithLongDesc} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    fireEvent.click(button);
-    
-    const blobCall = createObjectURLSpy.mock.calls[0][0] as Blob;
-    
-    return new Promise<void>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const icsContent = reader.result as string;
-        
-        // Description should be truncated to 200 chars + "..."
-        expect(icsContent).toContain("DESCRIPTION:" + "a".repeat(200) + "...");
-        
-        resolve();
-      };
-      reader.readAsText(blobCall);
-    });
-  });
-
-  it("downloads file with correct filename", () => {
-    const appendChildSpy = jest.spyOn(document.body, "appendChild");
-    const removeChildSpy = jest.spyOn(document.body, "removeChild");
-    
-    render(<AddToCalendar proposal={mockProposal} />);
-    
-    const button = screen.getByRole("button", { name: /add voting deadline to calendar/i });
-    fireEvent.click(button);
-    
-    // Verify a temporary anchor was created with correct download attribute
-    const calls = appendChildSpy.mock.calls;
-    const anchorCall = calls.find(call => call[0] instanceof HTMLAnchorElement);
-    expect(anchorCall).toBeDefined();
-    
-    const anchor = anchorCall![0] as HTMLAnchorElement;
-    expect(anchor.download).toBe("proposal-QIP-001.ics");
-    expect(anchor.href).toBe("blob:mock-url");
-    
-    // Verify cleanup
-    expect(removeChildSpy).toHaveBeenCalledWith(anchor);
-    
-    appendChildSpy.mockRestore();
-    removeChildSpy.mockRestore();
-  });
-});

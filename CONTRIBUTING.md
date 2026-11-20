@@ -34,7 +34,6 @@ quorum/
 │   └── token/        QUORUM governance token
 ├── sdk/          TypeScript client SDK (@quorum/sdk)
 ├── scripts/      Deployment and operational scripts
-├── tests/        Integration test stubs
 └── docs/         Architecture, whitepaper, tutorials
 ```
 
@@ -65,6 +64,30 @@ rustup target add wasm32-unknown-unknown
 
 # Stellar CLI
 cargo install stellar-cli --features opt
+```
+
+### Devcontainer (recommended)
+
+Skip the manual setup above with a devcontainer. It installs Node 20, Rust
+stable with the `wasm32-unknown-unknown` target, clippy/rustfmt and the Stellar
+CLI, then installs the workspace dependencies, so opening the repo leaves a
+working `cargo build` / `npm install` environment with no extra steps.
+
+- **GitHub Codespaces** — open the repo and pick the `Quorum (Stellar)` machine.
+- **VS Code** — install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers),
+  then run *Dev Containers: Reopen in Container* from the command palette.
+
+The definition lives in [`.devcontainer/`](.devcontainer/):
+[`.devcontainer/Dockerfile`](.devcontainer/Dockerfile) builds the toolchain
+image and [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json)
+wires it up. The container also enables docker-in-docker, so the local
+Soroban network can be started from inside it with `docker compose up -d`.
+
+Once the container is ready:
+
+```bash
+cd contracts && cargo build --target wasm32-unknown-unknown --release
+cd frontend && npm run dev   # http://localhost:3000
 ```
 
 ### Fork and Clone
@@ -119,11 +142,10 @@ All test suites and verification checks must pass before opening or merging a pu
 
 | Suite | Scope / Package | Shortcut | Primary Command | CI Equivalent |
 |---|---|---|---|---|
-| **All Suites** | Runs contracts, frontend, SDK, and integration suites | `make test` | — | — |
+| **All Suites** | Runs contracts, frontend, and SDK suites | `make test` | — | — |
 | **Contracts** | Unit and integration tests for Soroban contracts (`contracts/governance`, `contracts/token`) | `make test-contracts` | `cd contracts && cargo test` | `cargo test` |
 | **Frontend** | Unit and component tests for Next.js app (`frontend/`) | `make test-frontend` | `cd frontend && npm test` | `npm test` |
 | **SDK** | Client SDK tests (`sdk/`) | `make test-sdk` | `cd sdk && npm test` | `npm test` |
-| **Integration Stubs** | Integration test stubs (`tests/`) | `make test-integration` | `cd frontend && npx jest ../tests` | `npx jest tests/` |
 
 ### Local Soroban Network (Docker Compose)
 
@@ -149,14 +171,14 @@ cd contracts && cargo build --target wasm32-unknown-unknown --release && cd ..
 
 # Deploy governance contract
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/governance.wasm \
+  --wasm contracts/target/wasm32-unknown-unknown/release/quorum_governance.wasm \
   --source deployer \
   --rpc-url http://localhost:8000/soroban/rpc \
   --network-passphrase "Standalone Network ; February 2017"
 
 # Deploy token contract
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/token.wasm \
+  --wasm contracts/target/wasm32-unknown-unknown/release/quorum_token.wasm \
   --source deployer \
   --rpc-url http://localhost:8000/soroban/rpc \
   --network-passphrase "Standalone Network ; February 2017"
@@ -179,6 +201,70 @@ QUORUM_E2E_RPC_URL=http://localhost:8000/soroban/rpc \
 QUORUM_E2E_FRIENDBOT_URL=http://localhost:8000/friendbot \
 npm run test:e2e
 ```
+
+### Demo Proposal Seed Script
+
+`scripts/seed-demo-proposals.mjs` fills a network with demo governance data so
+the UI has something to show. It deploys both contracts (or reuses a
+deployment you point it at), funds three throwaway accounts and drives four
+proposals into one state each:
+
+| Proposal | Outcome | How it gets there |
+|---|---|---|
+| #1 | **Queued** | Passes quorum and a vote of `for`, then waits out the timelock |
+| #2 | **Failed** | Only a vote of `against`, so the quorum is not met |
+| #3 | **Executed** | Passes quorum, is finalized, waits out the timelock and executes |
+| #4 | **Active** | Created last, so its voting window is still open when the script ends |
+
+**Every run creates fresh data.** New contracts, new accounts, new proposals —
+nothing is reused and nothing is cleaned up, so the contract ids, the proposal
+ids and the account keys printed at the end differ on every run. The script is
+meant for a throwaway test network (the local quickstart network), never for a
+production one.
+
+Requirements:
+
+```bash
+# 1. The SDK's dependencies — the script uses @stellar/stellar-sdk from sdk/
+cd sdk && npm ci && cd ..
+
+# 2. The contract WASM files
+cd contracts && cargo build --target wasm32-unknown-unknown --release && cd ..
+
+# 3. A network with a friendbot, plus the Stellar CLI on PATH
+docker compose up -d
+```
+
+Then:
+
+```bash
+node scripts/seed-demo-proposals.mjs
+```
+
+The script prints the governance and token contract ids at the end. Point the
+frontend at them to try the seeded proposals:
+
+```bash
+NEXT_PUBLIC_GOVERNANCE_CONTRACT=<id>
+NEXT_PUBLIC_TOKEN_CONTRACT=<id>
+```
+
+Point it at an existing deployment instead of deploying new contracts with
+`QUORUM_GOVERNANCE_CONTRACT` (the token contract is read from the governance
+contract's config, and `QUORUM_TOKEN_ADMIN_SECRET` is needed to fund the demo
+voters there):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `QUORUM_RPC_URL` | `http://localhost:8000/soroban/rpc` | Soroban RPC endpoint |
+| `QUORUM_FRIENDBOT_URL` | `http://localhost:8000/friendbot` | Friendbot used to fund the demo accounts |
+| `QUORUM_NETWORK_PASSPHRASE` | `Standalone Network ; February 2017` | Network passphrase |
+| `QUORUM_WASM_DIR` | `contracts/target/wasm32-unknown-unknown/release` | Directory holding the built WASM files |
+| `QUORUM_GOVERNANCE_CONTRACT` | — | Governance contract to seed instead of deploying one |
+| `QUORUM_TOKEN_CONTRACT` | read from the governance config | Token contract to use |
+| `QUORUM_TOKEN_ADMIN_SECRET` | — | Secret key of the token admin, needed to fund the demo voters on an existing deployment |
+| `QUORUM_DEMO_VOTING_PERIOD` | `30` | Voting period of a freshly deployed contract, in ledgers |
+| `QUORUM_DEMO_TIMELOCK_PERIOD` | `2` | Timelock period of a freshly deployed contract, in ledgers |
 
 ### Mutation Testing
 
@@ -240,7 +326,7 @@ To run all test suites locally, ensure you have the following toolchains install
 | **cargo-audit** | latest | `cargo install cargo-audit` | Security vulnerability auditing |
 | **cargo-geiger** | latest | `cargo install cargo-geiger --locked` | Unsafe-code baseline for `contracts/` |
 | **Semgrep** | latest | `pipx install semgrep` | Security scanning of `frontend/` and `sdk/` |
-| **Node.js** | ≥ 18 (CI uses 20) | `nvm install 20 && nvm use 20` | Frontend, SDK, integration tests |
+| **Node.js** | ≥ 18 (CI uses 20) | `nvm install 20 && nvm use 20` | Frontend, SDK tests |
 | **npm** | ≥ 9 | Bundled with Node.js | Package management |
 | **Stellar CLI** | latest | `cargo install stellar-cli --features opt` | Contract CLI invocations |
 
@@ -352,24 +438,13 @@ make lint-sdk
 make audit-sdk
 ```
 
-### 4. Integration Test Stubs (`tests/`)
-
-The repository includes integration test stubs in `tests/` covering governance quorum calculations and proposal lookup:
-
-```bash
-cd frontend
-npx jest ../tests
-# Or shortcut from repo root:
-make test-integration
-```
-
 ### Workspace Root Helpers (Makefile & npm scripts)
 
 For convenience, a root `Makefile` (and `justfile`) provides shortcuts that fan out to the exact per-package commands documented above. You can run all checks across the entire repo or target specific packages from the repository root:
 
 ```bash
 # High-level workflows across all packages
-make test        # Run all test suites (contracts, frontend, SDK, integration)
+make test        # Run all test suites (contracts, frontend, SDK)
 make lint        # Run all linters (contracts clippy, frontend eslint, SDK eslint)
 make build       # Build all packages (SDK, frontend, contracts WASM)
 make audit       # Run security vulnerability audits across all packages
@@ -380,7 +455,6 @@ make ci          # Alias for make check
 make test-contracts    # cd contracts && cargo test
 make test-frontend     # cd frontend && npm test
 make test-sdk          # cd sdk && npm test
-make test-integration  # cd frontend && npx jest ../tests
 
 # Per-package lint shortcuts
 make lint-contracts    # cd contracts && cargo clippy --all-targets --all-features -- -D warnings
@@ -452,7 +526,10 @@ The Soroban contracts in `contracts/` are the heart of Quorum. Changes here requ
    - Use `checked_add()`, `checked_sub()` for all arithmetic
    - Emit an event via `env.events().publish()` for every state change
 3. Add the function to the contract's `README.md` with parameter docs
-4. Write at least 2 unit tests in `src/tests.rs` (happy path + error case)
+4. Write at least 2 unit tests in the appropriate test file:
+   - **Governance contract tests**: `contracts/governance/src/lib.rs` (inline `#[cfg(test)] mod tests`)
+   - **Token contract tests**: `contracts/token/src/lib.rs` (inline `#[cfg(test)] mod tests`) or `contracts/token/tests/`
+   - Use happy path + error case per test, covering the main behavior and edge cases
 
 ### Writing Contract Tests
 
@@ -633,6 +710,21 @@ Good documentation is as important as code. All documentation lives in `docs/` (
 - Code examples must be complete and runnable
 - Every new contract function needs documentation in the contract's `README.md`
 - Every new SDK method needs JSDoc with `@param`, `@returns`, `@throws`, and `@example`
+
+### Architecture Decision Records (ADRs)
+
+For significant design decisions—especially those involving trade-offs between approaches—record your reasoning in an [Architecture Decision Record](docs/adr/).
+
+**Write an ADR when:**
+- You are making a choice that affects multiple systems or long-term maintainability (e.g., protocol mechanics, contract ownership boundaries, storage strategies)
+- The decision involves trade-offs that future contributors should understand
+- The choice is unlikely to change once made
+
+**Do not write an ADR for:**
+- Routine code changes, bug fixes, or small refactors
+- Decisions that are obvious from the code
+
+See [docs/adr/README.md](docs/adr/README.md) for guidance, the [template](docs/adr/TEMPLATE.md), and examples.
 
 ### FAQ
 

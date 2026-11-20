@@ -6,9 +6,13 @@
 //! balance-moving path, a proposal snapshots it, balances keep moving, and the
 //! vote is finalized and executed. At each step it checks that governance
 //! counted exactly what the token's checkpoints recorded.
+//!
+//! The later tests cover the remaining governance paths end to end with both
+//! real contracts: co-sponsored proposals, conviction voting, proposal
+//! deposits (refunded and forfeited) and the token's staking vote boost.
 
 use quorum_governance::{GovernanceContract, GovernanceContractClient, GovernanceError, ProposalStatus};
-use quorum_token::{QuorumToken, QuorumTokenClient};
+use quorum_token::{QuorumToken, QuorumTokenClient, TokenError};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
 
@@ -17,6 +21,14 @@ const QUORUM_BPS: u32 = 500; // 5%
 const VOTING_PERIOD: u32 = 100;
 const TIMELOCK_PERIOD: u32 = 50;
 const PROPOSAL_THRESHOLD: i128 = 100_000;
+
+// Mirrors `LEDGERS_PER_DAY` in both contracts (private there).
+const LEDGERS_PER_DAY: u32 = 17_280;
+// Mirrors `CONVICTION_HALF_LIFE` in the governance contract (three days).
+const CONVICTION_HALF_LIFE: u32 = LEDGERS_PER_DAY * 3;
+// Mirrors `MAX_LOCK_LEDGERS` in the token contract (365 days), the scale of
+// the stake boost.
+const MAX_LOCK_LEDGERS: u32 = LEDGERS_PER_DAY * 365;
 
 const AGAINST: u32 = 0;
 const FOR: u32 = 1;
@@ -30,6 +42,10 @@ struct Dao<'a> {
 }
 
 fn setup<'a>() -> Dao<'a> {
+    setup_with(VOTING_PERIOD)
+}
+
+fn setup_with<'a>(voting_period: u32) -> Dao<'a> {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_sequence_number(100);
@@ -53,7 +69,7 @@ fn setup<'a>() -> Dao<'a> {
         &guardian,
         &token_id,
         &QUORUM_BPS,
-        &VOTING_PERIOD,
+        &voting_period,
         &TIMELOCK_PERIOD,
         &(17_280 * 7),
         &PROPOSAL_THRESHOLD,
@@ -243,4 +259,267 @@ fn snapshot_holders_can_defeat_a_proposal_that_live_balances_would_pass() {
         Err(Ok(GovernanceError::ProposalNotPassed))
     );
     assert_eq!(token.total_supply(), INITIAL_SUPPLY);
+}
+
+#[test]
+fn cosponsored_proposal_clears_threshold_on_combined_balances() {
+    let Dao { env, admin, token, governance } = setup();
+    let proposer = Address::generate(&env);
+    let cosponsor = Address::generate(&env);
+
+    // Each holds less than the 100,000 threshold alone; together they hold
+    // 110,000.
+    advance_to(&env, 101);
+    token.transfer(&admin, &proposer, &60_000);
+    token.transfer(&admin, &cosponsor, &50_000);
+
+    advance_to(&env, 110);
+    assert_eq!(
+        governance.try_create_proposal(&proposer, &text(&env, "t"), &text(&env, "d"), &text(&env, "")),
+        Err(Ok(GovernanceError::BelowProposalThreshold))
+    );
+    // A proposer cannot also be listed as a co-sponsor.
+    assert_eq!(
+        governance.try_create_cosponsored_proposal(
+            &proposer,
+            &soroban_sdk::vec![&env, proposer.clone()],
+            &text(&env, "t"),
+            &text(&env, "d"),
+            &text(&env, ""),
+        ),
+        Err(Ok(GovernanceError::InvalidCosponsors))
+    );
+
+    let id = governance.create_cosponsored_proposal(
+        &proposer,
+        &soroban_sdk::vec![&env, cosponsor.clone()],
+        &text(&env, "Co-sponsored grant"),
+        &text(&env, "Needs two holders to open."),
+        &text(&env, ""),
+    );
+    assert_eq!(governance.get_cosponsors(&id), soroban_sdk::vec![&env, cosponsor.clone()]);
+    let proposal = governance.get_proposal(&id);
+    assert_eq!(proposal.snapshot_ledger, 110);
+    assert_eq!(proposal.quorum_required, 50_000);
+
+    // Co-sponsors count toward the threshold at creation; after that each
+    // voter, co-sponsor or not, carries only their own snapshot balance.
+    advance_to(&env, 115);
+    governance.vote(&admin, &id, &FOR); // 890,000 held after the transfers above.
+    governance.vote(&proposer, &id, &FOR);
+    governance.vote(&cosponsor, &id, &AGAINST);
+
+    let proposal = governance.get_proposal(&id);
+    assert_eq!(proposal.for_votes, 890_000 + 60_000);
+    assert_eq!(proposal.against_votes, 50_000);
+
+    advance_to(&env, proposal.end_ledger + 1);
+    assert_eq!(governance.finalize(&id), ProposalStatus::Queued);
+    assert_supply_conserved(&token, &[&admin, &proposer, &cosponsor]);
+}
+
+#[test]
+fn conviction_decay_reverses_raw_majority_at_close() {
+    // A window of two half-lives, so an early vote decays exactly once before
+    // the close and the tally is decided on what remains.
+    let window = 2 * CONVICTION_HALF_LIFE;
+    let Dao { env, admin, token, governance } = setup_with(window);
+    let proposer = Address::generate(&env);
+    let for_voter = Address::generate(&env);
+    let against_voter = Address::generate(&env);
+
+    advance_to(&env, 101);
+    token.transfer(&admin, &proposer, &150_000);
+    token.transfer(&admin, &for_voter, &400_000);
+    token.transfer(&admin, &against_voter, &300_000);
+
+    advance_to(&env, 110);
+    let id = governance.create_conviction_proposal(
+        &proposer,
+        &text(&env, "Continuous grant stream"),
+        &text(&env, "Fund a stream of grants."),
+        &text(&env, ""),
+    );
+    let proposal = governance.get_proposal(&id);
+    assert_eq!(proposal.start_ledger, 111);
+    assert_eq!(proposal.end_ledger, 111 + window);
+
+    advance_to(&env, 112);
+    governance.vote(&for_voter, &id, &FOR);
+    assert_eq!(governance.get_conviction(&id).unwrap().for_conviction, 400_000);
+
+    // One half-life later the early support has halved; the late vote lands
+    // at full weight.
+    advance_to(&env, 112 + CONVICTION_HALF_LIFE);
+    governance.vote(&against_voter, &id, &AGAINST);
+    let tally = governance.get_conviction(&id).unwrap();
+    assert_eq!(tally.for_conviction, 200_000);
+    assert_eq!(tally.against_conviction, 300_000);
+
+    // Raw totals say For wins 400,000 to 300,000 ...
+    let proposal = governance.get_proposal(&id);
+    assert_eq!(proposal.for_votes, 400_000);
+    assert_eq!(proposal.against_votes, 300_000);
+
+    // ... but no further half-life passes before the close, so decayed support
+    // stands at 200,000 to 300,000 and the proposal fails.
+    advance_to(&env, proposal.end_ledger + 1);
+    assert_eq!(governance.finalize(&id), ProposalStatus::Failed);
+    assert_supply_conserved(&token, &[&admin, &proposer, &for_voter, &against_voter]);
+}
+
+#[test]
+fn deposit_is_refunded_to_proposer_when_proposal_passes() {
+    const DEPOSIT: i128 = 10_000;
+    let Dao { env, admin, token, governance } = setup();
+    let proposer = Address::generate(&env);
+    let voter = Address::generate(&env);
+    let poor = Address::generate(&env);
+    let rich = Address::generate(&env);
+
+    governance.set_proposal_deposit(&DEPOSIT);
+
+    advance_to(&env, 101);
+    token.transfer(&admin, &proposer, &150_000);
+    token.transfer(&admin, &voter, &400_000);
+    token.transfer(&admin, &poor, &5_000);
+    token.transfer(&admin, &rich, &200_000);
+
+    advance_to(&env, 110);
+    // The threshold is met, but the proposer's own balance cannot cover the
+    // deposit.
+    assert_eq!(
+        governance.try_create_cosponsored_proposal(
+            &poor,
+            &soroban_sdk::vec![&env, rich.clone()],
+            &text(&env, "t"),
+            &text(&env, "d"),
+            &text(&env, ""),
+        ),
+        Err(Ok(GovernanceError::InsufficientDeposit))
+    );
+
+    // Opening takes the deposit out of the proposer's balance into the
+    // governance contract.
+    let id = governance.create_proposal(
+        &proposer,
+        &text(&env, "Deposit-backed proposal"),
+        &text(&env, "Refunded if it passes."),
+        &text(&env, ""),
+    );
+    assert_eq!(token.balance(&proposer), 150_000 - DEPOSIT);
+    assert_eq!(token.balance(&governance.address), DEPOSIT);
+    assert_supply_conserved(&token, &[&admin, &proposer, &voter, &poor, &rich, &governance.address]);
+
+    advance_to(&env, 112);
+    governance.vote(&voter, &id, &FOR);
+
+    let proposal = governance.get_proposal(&id);
+    advance_to(&env, proposal.end_ledger + 1);
+    assert_eq!(governance.finalize(&id), ProposalStatus::Queued);
+
+    // A passed proposal gets the deposit back, and the contract holds none.
+    assert_eq!(token.balance(&proposer), 150_000);
+    assert_eq!(token.balance(&governance.address), 0);
+    assert_eq!(token.total_supply(), INITIAL_SUPPLY);
+    assert_supply_conserved(&token, &[&admin, &proposer, &voter, &poor, &rich, &governance.address]);
+}
+
+#[test]
+fn deposit_is_forfeited_when_proposal_fails() {
+    const DEPOSIT: i128 = 10_000;
+    let Dao { env, admin, token, governance } = setup();
+    let proposer = Address::generate(&env);
+    let voter = Address::generate(&env);
+
+    governance.set_proposal_deposit(&DEPOSIT);
+
+    advance_to(&env, 101);
+    token.transfer(&admin, &proposer, &150_000);
+    token.transfer(&admin, &voter, &400_000);
+
+    advance_to(&env, 110);
+    let id = governance.create_proposal(
+        &proposer,
+        &text(&env, "Deposit-backed proposal"),
+        &text(&env, "Forfeited if it fails."),
+        &text(&env, ""),
+    );
+    assert_eq!(token.balance(&proposer), 150_000 - DEPOSIT);
+    assert_eq!(token.balance(&governance.address), DEPOSIT);
+
+    advance_to(&env, 112);
+    governance.vote(&voter, &id, &AGAINST);
+
+    let proposal = governance.get_proposal(&id);
+    advance_to(&env, proposal.end_ledger + 1);
+    assert_eq!(governance.finalize(&id), ProposalStatus::Failed);
+
+    // The deposit is burned: the proposer is not repaid, the contract holds
+    // nothing, and total supply shrinks by exactly the deposit.
+    assert_eq!(token.balance(&proposer), 150_000 - DEPOSIT);
+    assert_eq!(token.balance(&governance.address), 0);
+    assert_eq!(token.total_supply(), INITIAL_SUPPLY - DEPOSIT);
+    assert_supply_conserved(&token, &[&admin, &proposer, &voter, &governance.address]);
+
+    // A failed proposal cannot be finalized again, so the deposit cannot move
+    // twice.
+    assert_eq!(governance.try_finalize(&id), Err(Ok(GovernanceError::VotingNotActive)));
+    assert_eq!(token.total_supply(), INITIAL_SUPPLY - DEPOSIT);
+}
+
+#[test]
+fn staking_boost_adds_to_snapshot_vote_power_and_locks_balance() {
+    const STAKE: i128 = 150_000;
+    const STAKE_LEDGER: u32 = 101;
+    const SNAPSHOT: u32 = 110;
+    let Dao { env, admin, token, governance } = setup();
+    let staker = Address::generate(&env);
+    let opponent = Address::generate(&env);
+
+    advance_to(&env, STAKE_LEDGER);
+    token.transfer(&admin, &staker, &200_000);
+    token.transfer(&admin, &opponent, &260_000);
+    // Locked for the maximum term, so the boost starts at the full stake.
+    token.stake(&staker, &STAKE, &MAX_LOCK_LEDGERS);
+    let unlock_ledger = STAKE_LEDGER + MAX_LOCK_LEDGERS;
+
+    // The stake does not move balances; it only locks part of them.
+    assert_eq!(token.balance(&staker), 200_000);
+    assert_eq!(token.locked_balance(&staker), STAKE);
+    assert_eq!(token.spendable_balance(&staker), 200_000 - STAKE);
+
+    advance_to(&env, SNAPSHOT);
+    let id = governance.create_proposal(
+        &staker,
+        &text(&env, "Boosted vote"),
+        &text(&env, "Staker's boosted weight decides."),
+        &text(&env, ""),
+    );
+    let snapshot = governance.get_proposal(&id).snapshot_ledger;
+    assert_eq!(snapshot, SNAPSHOT);
+
+    // Without the boost the opponent's 260,000 would beat the staker's 200,000.
+    // The boost at the snapshot is the stake scaled by the time left to unlock.
+    let remaining = i128::from(unlock_ledger - snapshot);
+    let expected_boost = STAKE * remaining / i128::from(MAX_LOCK_LEDGERS);
+    assert!(expected_boost > 260_000 - 200_000);
+
+    advance_to(&env, 115);
+    governance.vote(&staker, &id, &FOR);
+    governance.vote(&opponent, &id, &AGAINST);
+
+    let proposal = governance.get_proposal(&id);
+    assert_eq!(proposal.for_votes, 200_000 + expected_boost);
+    assert_eq!(proposal.against_votes, 260_000);
+
+    advance_to(&env, proposal.end_ledger + 1);
+    assert_eq!(governance.finalize(&id), ProposalStatus::Queued);
+
+    // Voting never moved balances, and the lock still holds: the staked part
+    // cannot be spent or released before its unlock ledger.
+    assert_eq!(token.balance(&staker), 200_000);
+    assert!(token.try_transfer(&staker, &opponent, &60_000).is_err());
+    assert_eq!(token.try_unstake(&staker), Err(Ok(TokenError::LockNotExpired)));
+    assert_supply_conserved(&token, &[&admin, &staker, &opponent]);
 }

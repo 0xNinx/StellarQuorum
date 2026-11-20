@@ -281,6 +281,101 @@ Because decay is applied at the close and not at `finalize`, the result is the
 same whenever `finalize` is called. The window and quorum are the same as for
 standard proposals.
 
+## Computing Voting Power: Delegation, Staking, and Conviction
+
+A voter's power in a proposal is determined by three layers: **base balance + delegation + staking boost**, decayed if conviction is enabled.
+
+### Base Power: Balance at Snapshot
+
+The token contract records balance checkpoints. When a proposal is created, `snapshot_ledger` captures the moment:
+
+```
+voting_power = get_past_balance(voter, snapshot_ledger)
+```
+
+This is "live" balance when the proposal opens (checked at a fixed ledger), not live balance at vote time. Tokens bought after a proposal opens carry no weight.
+
+### Layer 1: Delegation — Routing Power to a Representative
+
+If the voter has delegated their tokens, `get_past_votes` looks up the representative instead:
+
+```
+representative = get_delegate(voter, snapshot_ledger)
+voting_power = get_past_balance(representative, snapshot_ledger)
+```
+
+Delegation is routable: a holder can point their tokens at any representative without moving them. A delegate who also delegates keeps their own weight entrusted by other voters but does not forward it. Delegation is not transitive.
+
+### Layer 2: Staking Boost — Vote-Escrow Multiplier
+
+A voter can lock part of their balance for 7–365 days via `stake()` to earn a linear boost:
+
+```
+locked_amount = get_locked_balance(voter)
+unlock_ledger = when the lock expires
+ledgers_until_unlock = max(0, unlock_ledger - snapshot_ledger)
+boost = (locked_amount * ledgers_until_unlock) / (365 * LEDGERS_PER_DAY)
+
+voting_power = get_past_balance(voter, snapshot_ledger) + boost
+```
+
+The boost decays linearly from the staking ledger to unlock, reaching zero at unlock. Staking is personal to the holder; delegation does not forward the boost. A locked amount still reduces the voter's spendable balance but stays in their account.
+
+### Layer 3: Conviction Decay — Time-Weighted Support
+
+For conviction proposals, the voter's power (from layers 1 and 2) is added to the proposal's tally, then both tallies decay to the voting close:
+
+```
+// When the vote is cast at ledger t:
+ledgers_since_vote = end_ledger - t
+half_lives_since_vote = floor(ledgers_since_vote / CONVICTION_HALF_LIFE)
+decayed_power = voting_power / (2 ^ half_lives_since_vote)
+
+// Add decayed_power to For or Against tally
+```
+
+The tallies are recomputed at `finalize()` to `end_ledger`, so the result is deterministic regardless of when `finalize()` is called.
+
+### Data Flow: Diagram
+
+```
+Voter
+  │
+  ├─ balance checkpoint ───────────────────┐
+  │   (snapshot_ledger)                     │
+  │                                         ├──► voting_power_base
+  ├─ delegation ───────────────────────────┤
+  │   (at snapshot_ledger, routes to rep)   │
+  │                                         │
+  ├─ stake lock ────────────────────────────┤
+  │   (locked_amount × time_to_unlock)      ├──► voting_power_with_boost
+  │                                         │
+  │                                    (For standard proposals: use directly)
+  │
+  │                              (For conviction proposals:)
+  │
+  └─ vote_time ──────────────────────────────┐
+     (decay by half-lives)                    ├──► decayed_voting_power
+                                              │
+                                              └──► add to For/Against tally
+                                                   (re-decay at finalize)
+```
+
+### Example: Calculating a Single Vote
+
+A voter with:
+- 500 tokens at snapshot
+- 100 locked for 180 days (since stake ledger)
+- Delegated to address X
+- Voting on a 10-day conviction proposal, 3 days after it opened
+
+Steps:
+
+1. **Base (delegated):** Representative X has 500 tokens → 500 power
+2. **Boost:** 100 locked × (180/365) ≈ 49 → total = 549 power
+3. **Conviction decay:** Vote cast 3 days after open, 7 days until close → 7/3 ≈ 2.33 half-lives → decay twice:
+   - 549 / 4 = 137 (rounded down) added to the tally
+
 ## Event model
 
 Both contracts publish a typed event for every state change. Each event has a
