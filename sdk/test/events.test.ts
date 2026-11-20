@@ -132,6 +132,61 @@ const sample: Array<[string, xdr.ScVal, Record<string, unknown>]> = [
     structVal({ previous_admin: addr(VOTER), new_admin: addr(VOTER) }),
     { type: 'admin_transferred', previousAdmin: VOTER, newAdmin: VOTER },
   ],
+  [
+    'proposal_vetoed',
+    structVal({ id: u64(7n), guardian: addr(VOTER), reason: str('Invalid proposal') }),
+    { type: 'proposal_vetoed', id: 7n, guardian: VOTER, reason: 'Invalid proposal' },
+  ],
+  [
+    'proposal_action_set',
+    structVal({ id: u64(7n), target: addr(VOTER), function: str('execute') }),
+    { type: 'proposal_action_set', id: 7n, target: VOTER, function: 'execute' },
+  ],
+  [
+    'guardian_changed',
+    structVal({ previous_guardian: addr(VOTER), new_guardian: addr(VOTER) }),
+    { type: 'guardian_changed', previousGuardian: VOTER, newGuardian: VOTER },
+  ],
+  [
+    'deposit_refunded',
+    structVal({ id: u64(7n), proposer: addr(VOTER), amount: i128(100n) }),
+    { type: 'deposit_refunded', id: 7n, proposer: VOTER, amount: 100n },
+  ],
+  [
+    'deposit_forfeited',
+    structVal({ id: u64(7n), amount: i128(50n) }),
+    { type: 'deposit_forfeited', id: 7n, amount: 50n },
+  ],
+  [
+    'target_allowlist_updated',
+    structVal({ admin: addr(VOTER), target: addr(VOTER), allowed: nativeToScVal(true) }),
+    { type: 'target_allowlist_updated', admin: VOTER, target: VOTER, allowed: true },
+  ],
+  [
+    'proposal_deposit_updated',
+    structVal({ amount: i128(500n) }),
+    { type: 'proposal_deposit_updated', amount: 500n },
+  ],
+  [
+    'proposer_cooldown_updated',
+    structVal({ ledgers: u32(1000) }),
+    { type: 'proposer_cooldown_updated', ledgers: 1000 },
+  ],
+  [
+    'upgraded',
+    structVal({ new_wasm_hash: str('aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899') }),
+    { type: 'upgraded', newWasmHash: 'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899' },
+  ],
+  [
+    'stake',
+    structVal({ owner: addr(VOTER), amount: i128(1000n), unlock_ledger: u32(5000) }),
+    { type: 'stake', owner: VOTER, amount: 1000n, unlockLedger: 5000 },
+  ],
+  [
+    'unstake',
+    structVal({ owner: addr(VOTER), amount: i128(1000n) }),
+    { type: 'unstake', owner: VOTER, amount: 1000n },
+  ],
 ];
 
 describe('decoding every emitted event', () => {
