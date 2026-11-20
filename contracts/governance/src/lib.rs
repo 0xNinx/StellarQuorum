@@ -180,6 +180,12 @@ pub struct VoteCast {
     pub voter: Address,
     pub support: u32,
     pub voting_power: i128,
+    /// The vote the voter cast previously, if any (#431).
+    ///
+    /// `None` on a first vote; `Some(prev)` on a changed vote. An indexer
+    /// reconstructing tallies from events must subtract `voting_power` from
+    /// `previous_support` and add it to `support` rather than double-counting.
+    pub previous_support: Option<u32>,
 }
 
 #[contracttype]
@@ -394,6 +400,30 @@ pub struct Proposal {
     pub kind: ProposalKind,
 }
 
+/// Lightweight view of a proposal for list screens (#429).
+///
+/// `get_proposals` returns the full `Proposal` including `description` (up to
+/// 10 KB each), which approaches RPC response limits on a full page. List UIs
+/// only need the title, status, tallies and ledgers.  This type omits
+/// `description` and `metadata_uri` so a page of 100 summaries stays well
+/// under the response budget.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposalSummary {
+    pub id: u64,
+    pub proposer: Address,
+    pub title: String,
+    pub for_votes: i128,
+    pub against_votes: i128,
+    pub abstain_votes: i128,
+    pub snapshot_ledger: u32,
+    pub start_ledger: u32,
+    pub end_ledger: u32,
+    pub queue_ledger: u32,
+    pub status: ProposalStatus,
+    pub kind: ProposalKind,
+}
+
 /// One call a proposal makes when it executes: `function` on `target` with `args`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -592,7 +622,7 @@ impl GovernanceContract {
 
         env.events().publish(
             (Symbol::new(&env, "vote_cast"), proposal_id, voter.clone()),
-            VoteCast { proposal_id, voter, support, voting_power },
+            VoteCast { proposal_id, voter, support, voting_power, previous_support: previous },
         );
         Ok(())
     }
@@ -849,6 +879,49 @@ impl GovernanceContract {
         }
 
         Ok(proposals)
+    }
+
+    /// Return lightweight summaries for the given range of proposals (#429).
+    ///
+    /// Same pagination contract as `get_proposals` but omits `description` and
+    /// `metadata_uri`, keeping the response small even at the 100-item max.
+    pub fn get_proposal_summaries(
+        env: Env,
+        start: u64,
+        limit: u32,
+    ) -> Result<soroban_sdk::Vec<ProposalSummary>, GovernanceError> {
+        const MAX_PAGE_SIZE: u32 = 100;
+        let bounded_limit = if limit > MAX_PAGE_SIZE { MAX_PAGE_SIZE } else { limit };
+
+        let count = Self::get_proposal_count(env.clone());
+        let mut summaries = soroban_sdk::Vec::new(&env);
+
+        if start < 1 || start > count {
+            return Ok(summaries);
+        }
+
+        let end = start.saturating_add(u64::from(bounded_limit)).min(count + 1);
+
+        for id in start..end {
+            if let Ok(p) = Self::get_proposal(env.clone(), id) {
+                summaries.push_back(ProposalSummary {
+                    id: p.id,
+                    proposer: p.proposer,
+                    title: p.title,
+                    for_votes: p.for_votes,
+                    against_votes: p.against_votes,
+                    abstain_votes: p.abstain_votes,
+                    snapshot_ledger: p.snapshot_ledger,
+                    start_ledger: p.start_ledger,
+                    end_ledger: p.end_ledger,
+                    queue_ledger: p.queue_ledger,
+                    status: p.status,
+                    kind: p.kind,
+                });
+            }
+        }
+
+        Ok(summaries)
     }
 
     /// Returns all proposals opened by a specific address.
@@ -1128,9 +1201,24 @@ impl GovernanceContract {
         proposal.status = ProposalStatus::Cancelled;
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
         Self::touch_proposal(&env, proposal_id);
-        // A cancelled proposal forfeits any deposit it still holds. One that
-        // already passed had its deposit refunded at queueing, so nothing is left.
-        Self::forfeit_deposit(&env, &config.token, proposal_id);
+
+        // Issue #430: rule — refund the deposit when the proposer cancels
+        // their own proposal before voting has started (before start_ledger);
+        // burn it in every other case (admin-cancel, or self-cancel mid-vote).
+        //
+        // Rationale: a proposer who spots a mistake and withdraws immediately
+        // is not a spammer; penalising them the same as a bad-faith actor
+        // discourages last-minute corrections. Once voting has started, voters
+        // have already acted on the proposal, so the deposit is forfeited as
+        // normal to prevent vote-after-cancellation manipulation.
+        let is_self_cancel_before_voting = caller == proposal.proposer
+            && env.ledger().sequence() < proposal.start_ledger;
+
+        if is_self_cancel_before_voting {
+            Self::refund_deposit(&env, &config.token, &proposal);
+        } else {
+            Self::forfeit_deposit(&env, &config.token, proposal_id);
+        }
 
         env.events().publish(
             (Symbol::new(&env, "proposal_cancelled"), proposal_id),
@@ -1554,10 +1642,33 @@ impl GovernanceContract {
     /// multiplied by `quorum_bps` can exceed `i128::MAX`.
     /// Extends the TTL of a proposal entry so a long voting window cannot
     /// outlive its own storage.
+    /// Extend the TTL of the `Proposal` entry AND every other per-proposal
+    /// key that a live proposal may have written (#428).
+    ///
+    /// Previously only `DataKey::Proposal(id)` was bumped here. The actions,
+    /// deposit, co-sponsors and conviction tally are only extended when first
+    /// written, so a proposal sitting quietly through a long voting window (or
+    /// waiting in the queue) could have those entries archived while the
+    /// proposal itself was still live. `execute()` or `cancel()` would then
+    /// fail until someone called `restore`. Now all five keys are extended
+    /// together — entries that don't exist yet are silently skipped.
     fn touch_proposal(env: &Env, id: u64) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Proposal(id), TTL_THRESHOLD, TTL_EXTEND_TO);
+        let storage = env.storage().persistent();
+        storage.extend_ttl(&DataKey::Proposal(id), TTL_THRESHOLD, TTL_EXTEND_TO);
+
+        // Per-proposal entries that may or may not exist depending on whether
+        // the proposal used them. `extend_ttl` on a missing key is a no-op.
+        let optional_keys: [DataKey; 4] = [
+            DataKey::ProposalAction(id),
+            DataKey::Deposit(id),
+            DataKey::CoSponsors(id),
+            DataKey::Conviction(id),
+        ];
+        for key in optional_keys.iter() {
+            if storage.has(key) {
+                storage.extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+            }
+        }
     }
 
     /// Extends the TTL of a recorded vote, so `has_voted` and `get_vote` keep
