@@ -37,6 +37,7 @@ pub enum GovernanceError {
     BelowProposalThreshold  = 9,
     InvalidVoteChoice       = 10,
     VotingPeriodEnded       = 11,
+    ActionAddedAfterVotingStarted = 20, // #406
     TimelockNotExpired      = 12,
     Overflow                = 13,
     NoVotingPower           = 14,
@@ -1038,6 +1039,11 @@ impl GovernanceContract {
             return Err(GovernanceError::Unauthorized);
         }
         if env.ledger().sequence() > proposal.end_ledger { return Err(GovernanceError::VotingPeriodEnded); }
+        // #406: actions must be locked in before voting opens — after start_ledger,
+        // voters cannot see or react to new actions, so reject any late additions.
+        if env.ledger().sequence() >= proposal.start_ledger {
+            return Err(GovernanceError::ActionAddedAfterVotingStarted);
+        }
         if proposal.status != ProposalStatus::Active { return Err(GovernanceError::VotingNotActive); }
         if !Self::target_allowed(&env, &target) {
             return Err(GovernanceError::TargetNotAllowed);
