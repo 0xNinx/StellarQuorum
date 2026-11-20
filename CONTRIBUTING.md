@@ -245,8 +245,8 @@ The script prints the governance and token contract ids at the end. Point the
 frontend at them to try the seeded proposals:
 
 ```bash
-NEXT_PUBLIC_GOVERNANCE_CONTRACT=<id>
-NEXT_PUBLIC_TOKEN_CONTRACT=<id>
+NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID=<id>
+NEXT_PUBLIC_TOKEN_CONTRACT_ID=<id>
 ```
 
 Point it at an existing deployment instead of deploying new contracts with

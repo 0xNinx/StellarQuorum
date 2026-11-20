@@ -88,7 +88,7 @@ Typical initialization parameters:
 |-----------|-------------|-------|
 | `quorum_bps` | 500 | 5% of total token supply |
 | `voting_period` | 17,280 ledgers | ~24 hours at 5s/ledger |
-| `timelock_period` | 8,640 ledgers | ~12 hours for guardian review |
+| `timelock_period` | 34,560 ledgers | ~48 hours for guardian review |
 | `proposal_threshold` | 0.05% of supply | Prevents spam |
 | `admin` | Multisig address | Initially only multisig can propose system changes |
 | `token` | Token contract ID | From Step 1.1 |

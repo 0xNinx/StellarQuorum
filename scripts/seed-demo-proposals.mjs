@@ -740,8 +740,8 @@ async function main() {
 
   console.log("");
   console.log("Add to .env.local to point the frontend at the seeded contracts:");
-  console.log(`  NEXT_PUBLIC_GOVERNANCE_CONTRACT=${governanceId}`);
-  console.log(`  NEXT_PUBLIC_TOKEN_CONTRACT=${tokenId}`);
+  console.log(`  NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID=${governanceId}`);
+  console.log(`  NEXT_PUBLIC_TOKEN_CONTRACT_ID=${tokenId}`);
   console.log("");
 }
 

@@ -1,9 +1,8 @@
-# cargo-deny configuration for the contracts workspace (issue #336).
+# cargo-deny configuration for the contracts workspace (issues #336, #400).
 #
-# Only the `licenses` check runs in CI (`cargo deny check licenses`); advisory
-# and ban checks are already covered by `cargo audit` and review. The allowed
-# license list below is documented for humans in docs/dependency-licenses.md —
-# keep the two in sync when changing either.
+# CI runs `cargo deny check licenses bans sources`; advisories are covered by
+# `cargo audit`. The allowed license list below is documented for humans in
+# docs/dependency-licenses.md — keep the two in sync when changing either.
 
 [licenses]
 # Permissive licenses only. The project is MIT-licensed, so any of these can
@@ -30,3 +29,24 @@ allow = [
 # SPDX expressions like `(MIT OR Apache-2.0)` are resolved against the list
 # above; 0.8 is cargo-deny's default confidence for license-file-only crates.
 confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "simplest-path"
+skip = [
+    { crate = "darling@=0.20.11", reason = "soroban-sdk-macros 22.0.11 pins darling 0.20; serde_with 3.x pulls 0.24." },
+    { crate = "darling_core@=0.20.11", reason = "Companion crate for the pinned darling 0.20 used by soroban-sdk-macros." },
+    { crate = "darling_macro@=0.20.11", reason = "Companion crate for the pinned darling 0.20 used by soroban-sdk-macros." },
+    { crate = "hashbrown@=0.13.2", reason = "ark-ec/ark-poly 0.4.2 require hashbrown 0.13; indexmap 2.x requires 0.17." },
+    { crate = "syn@=1.0.109", reason = "ark-* derive crates 0.4.2 require syn 1; Soroban macros require syn 2 or 3." },
+    { crate = "syn@=3.0.5", reason = "serde_derive 1.0.229 and serde_with_macros 3.23 moved to syn 3; Soroban 22 macros remain on syn 2." },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+required-git-spec = "rev"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

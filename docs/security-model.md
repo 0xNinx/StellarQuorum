@@ -69,7 +69,7 @@ Checklist for the author and the reviewer:
 
 ### 3. Rush Execution
 **Threat:** A passed proposal is executed immediately before token holders can react.
-**Mitigation:** All passed proposals enter a **timelock** (default ~12 hours) before execution. During this window, the guardian multisig can veto.
+**Mitigation:** All passed proposals enter a **timelock** (default ~48 hours) before execution. During this window, the guardian multisig can veto.
 
 ### 4. Spam Proposals
 **Threat:** An attacker fills the proposal queue with low-quality proposals.

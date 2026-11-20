@@ -3,9 +3,10 @@
 // inside the Stellar SDK. Everything the app reads is validated here, once, and
 // the failure names the variable and what was wrong with it.
 //
-// The variables are read one by one with a static `process.env.NEXT_PUBLIC_*`
+// Configuration values are read one by one with a static `process.env.NEXT_PUBLIC_*`
 // expression — Next inlines those textually, so a computed lookup like
-// `process.env[name]` would silently be empty in the client bundle.
+// `process.env[name]` would silently be empty in the client bundle. The old names
+// are only used for a deprecation warning, not for configuration.
 
 export const DEFAULT_RPC_URL = "https://soroban-testnet.stellar.org";
 export const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
@@ -58,6 +59,8 @@ export const ENV_VARS = [
 export interface EnvInput {
   governanceContractId?: string;
   tokenContractId?: string;
+  legacyGovernanceContractId?: string;
+  legacyTokenContractId?: string;
   rpcUrl?: string;
   networkPassphrase?: string;
   useFixture?: string;
@@ -175,6 +178,8 @@ export function readProcessEnv(): EnvInput {
   return {
     governanceContractId: process.env.NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID,
     tokenContractId: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID,
+    legacyGovernanceContractId: process.env["NEXT_PUBLIC_GOVERNANCE_" + "CONTRACT"],
+    legacyTokenContractId: process.env["NEXT_PUBLIC_TOKEN_" + "CONTRACT"],
     rpcUrl: process.env.NEXT_PUBLIC_STELLAR_RPC_URL,
     networkPassphrase: process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE,
     useFixture: process.env.NEXT_PUBLIC_USE_FIXTURE,
@@ -190,6 +195,12 @@ export function readProcessEnv(): EnvInput {
  */
 export function loadEnv(input: EnvInput = readProcessEnv()): AppEnv {
   const problems: string[] = [];
+
+  if (clean(input.legacyGovernanceContractId) !== null || clean(input.legacyTokenContractId) !== null) {
+    console.warn(
+      "NEXT_PUBLIC_GOVERNANCE_CONTRACT and NEXT_PUBLIC_TOKEN_CONTRACT are deprecated; use NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID and NEXT_PUBLIC_TOKEN_CONTRACT_ID instead.",
+    );
+  }
 
   const fixtureFlag = clean(input.useFixture);
   if (fixtureFlag !== null && fixtureFlag !== "0" && fixtureFlag !== "1") {

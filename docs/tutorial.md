@@ -59,12 +59,12 @@ stellar contract invoke --id $TOKEN_ID --source admin --network testnet -- \
   initialize --admin $ADMIN --name Quorum --symbol QUORUM \
   --decimals 7 --initial_supply 100000000000000
 
-# Governance: 5% quorum, ~24h voting, ~12h timelock, 50,000 QUORUM to propose
+# Governance: 5% quorum, ~24h voting, ~48h timelock, 50,000 QUORUM to propose
 GOV_ID=$(stellar contract deploy --wasm $WASM/quorum_governance.wasm \
   --source admin --network testnet)
 stellar contract invoke --id $GOV_ID --source admin --network testnet -- \
   initialize --admin $ADMIN --guardian $ADMIN --token $TOKEN_ID \
-  --quorum_bps 500 --voting_period 17280 --timelock_period 8640 \
+  --quorum_bps 500 --voting_period 17280 --timelock_period 34560 \
   --execution_grace_period 17280 --proposal_threshold 500000000000
 
 echo "GOV_ID=$GOV_ID"
@@ -580,7 +580,7 @@ npm run dev    # http://localhost:3000
 
 Every variable is validated at startup by `frontend/lib/env.ts`. A malformed contract ID or URL stops the app with a message naming the variable. With no contract ID and `NEXT_PUBLIC_USE_FIXTURE` unset, the app serves bundled mock proposals, which is handy for UI work offline.
 
-> `scripts/deploy.sh` prints `NEXT_PUBLIC_GOVERNANCE_CONTRACT` / `NEXT_PUBLIC_TOKEN_CONTRACT`. The frontend reads the `..._ID` names shown above.
+> `scripts/deploy.sh` prints `NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID` / `NEXT_PUBLIC_TOKEN_CONTRACT_ID`, the same names the frontend reads.
 
 ### 8.2 Customize
 

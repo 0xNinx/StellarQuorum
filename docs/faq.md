@@ -33,7 +33,7 @@ A: No. Once a vote is cast, it cannot be changed or withdrawn. This is a deliber
 
 **Q: What happens during the timelock period?**
 
-A: After a proposal passes (quorum reached and For > Against), it enters a timelock period (default: 12 hours). During this window, the guardian multisig can veto the proposal as a safety net against governance attacks. Once the timelock expires, the proposal can be executed.
+A: After a proposal passes (quorum reached and For > Against), it enters a timelock period (default: 48 hours). During this window, the guardian multisig can veto the proposal as a safety net against governance attacks. Once the timelock expires, the proposal can be executed.
 
 **Q: Who is the guardian and what can they do?**
 

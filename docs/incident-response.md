@@ -69,7 +69,7 @@ Set up automated alerts for:
 
 **When to use:**
 - A malicious proposal has passed and is queued for execution
-- The proposal is within the timelock window (default 12 hours)
+- The proposal is within the timelock window (default 48 hours)
 - The threat is time-sensitive and cannot wait for token holder response
 
 **Steps:**
@@ -348,7 +348,7 @@ When deciding whether to veto, ask:
 **Response:**
 1. Guardian detects via automated alert
 2. Guardian convenes multisig (3-of-5)
-3. Guardian vetoes during timelock (12 hours remaining)
+3. Guardian vetoes during timelock (48 hours remaining)
 4. Announce veto on Discord and X
 5. Investigate voting patterns (was it a whale or coordinated attack?)
 6. Consider increasing proposal threshold to prevent future attempts

@@ -41,18 +41,18 @@ Quorum's governance parameters are set once at initialization and cannot be chan
 
 ### `timelock_period` — Timelock Delay
 
-**What it is:** The mandatory waiting period between a proposal passing and its execution, measured in ledgers. At ~5 seconds per ledger, 8,640 ledgers ≈ 12 hours.
+**What it is:** The mandatory waiting period between a proposal passing and its execution, measured in ledgers. At ~5 seconds per ledger, 34,560 ledgers ≈ 48 hours.
 
 **Trade-offs:**
 - **Too short (e.g. 1,800 = ~2.5 hours):** The guardian has insufficient time to review and veto. Security is compromised.
-- **Too long (e.g. 34,560 = ~2 days):** Execution is delayed. Market conditions may change, making the action suboptimal.
+- **Too long (e.g. 86,400 = ~5 days):** Execution is delayed. Market conditions may change, making the action suboptimal.
 - **Sweet spot:** Enough time for the guardian to review, short enough that execution is timely.
 
-**Recommended starting value:** `8,640` (≈ 12 hours)
+**Recommended starting value:** `34,560` (≈ 48 hours)
 
-**Reasoning:** 12 hours gives the guardian multisig a full business day to review a queued proposal and decide whether to veto. This is a reasonable balance between security and execution speed.
+**Reasoning:** 48 hours gives the guardian multisig two full days to review a queued proposal, including weekends and different timezones. This is a reasonable balance between security and execution speed.
 
-**How to revisit:** If the guardian consistently vetoes within the first hour, the timelock could be shortened. If the guardian needs more review time, lengthen it.
+**How to revisit:** If the guardian consistently vetoes on the first day, the timelock could be shortened. If the guardian needs more review time, lengthen it.
 
 ---
 
@@ -79,14 +79,14 @@ Quorum's governance parameters are set once at initialization and cannot be chan
 |-----------|-------------|--------------|-----------|
 | `quorum_bps` | 500 | 5% of supply | Participation vs. capture resistance |
 | `voting_period` | 17,280 | ~24 hours | Global access vs. speed |
-| `timelock_period` | 8,640 | ~12 hours | Security review vs. execution speed |
+| `timelock_period` | 34,560 | ~48 hours | Security review vs. execution speed |
 | `proposal_threshold` | 500,000,000,000 | 50,000 QUORUM | Spam prevention vs. accessibility |
 
 ## Governance Instance Strategy
 
 Since parameters are immutable, consider deploying **multiple governance instances** for different proposal types:
 
-- **Standard governance:** Default parameters (24h vote, 12h timelock)
+- **Standard governance:** Default parameters (24h vote, 48h timelock)
 - **Emergency governance:** Shorter voting period (6h) + shorter timelock (2h) for urgent fixes
 - **Treasury governance:** Longer voting period (3d) + higher threshold for large fund movements
 

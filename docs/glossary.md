@@ -37,7 +37,7 @@ The window during which votes are accepted, measured in ledgers. At ~5 seconds p
 The minimum token balance a proposer must hold to create a proposal. Measured in the token's smallest unit (stroops, with 7 decimals). Example: `500000000000` = 50,000 QUORUM. This prevents spam.
 
 ### Timelock
-A mandatory waiting period between a proposal passing and its execution. During the timelock, a guardian multisig can veto. Measured in ledgers. `8,640 ledgers ≈ 12 hours`.
+A mandatory waiting period between a proposal passing and its execution. During the timelock, a guardian multisig can veto. Measured in ledgers. `34,560 ledgers ≈ 48 hours`.
 
 ### Finalize
 The act of closing a proposal's voting window and determining its outcome. A proposal passes if quorum is reached AND the For votes exceed the Against votes. Anyone can call `finalize` after the voting period ends.

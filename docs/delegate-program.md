@@ -54,7 +54,7 @@ For every vote, a delegate should publish a rationale that includes:
 - **Delegator alignment** — how this vote aligns with your delegate platform
 
 **Example rationale:**
-> "I voted FOR this proposal to increase the timelock period from 12 to 24 hours. The rationale: recent governance attacks on other protocols show that 12 hours is insufficient for guardian review. While this slows execution speed, the security benefit outweighs the cost. This aligns with my platform of prioritizing security over efficiency."
+> "I voted FOR this proposal to increase the timelock period from 48 to 72 hours. The rationale: recent governance attacks on other protocols show that 48 hours is insufficient for guardian review in high-risk proposals. While this slows execution speed, the security benefit outweighs the cost. This aligns with my platform of prioritizing security over efficiency."
 
 #### Communication Channels
 

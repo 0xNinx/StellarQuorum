@@ -55,6 +55,13 @@ jobs:
           NETWORK: testnet
           SOURCE_ACCOUNT: deployer
           DEPLOY_OUTPUT: deployment-testnet.json
+          GUARDIAN: ${{ vars.GUARDIAN }}
+          INITIAL_SUPPLY: ${{ vars.INITIAL_SUPPLY }}
+          QUORUM_BPS: ${{ vars.QUORUM_BPS }}
+          VOTING_PERIOD: ${{ vars.VOTING_PERIOD }}
+          TIMELOCK_PERIOD: ${{ vars.TIMELOCK_PERIOD }}
+          EXECUTION_GRACE_PERIOD: ${{ vars.EXECUTION_GRACE_PERIOD }}
+          PROPOSAL_THRESHOLD: ${{ vars.PROPOSAL_THRESHOLD }}
         run: bash scripts/deploy.sh
       - name: Summarize deployment
         run: |

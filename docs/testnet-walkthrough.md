@@ -198,7 +198,7 @@ Click "Approve" in Freighter to sign.
 - The governance contract calculates final vote tallies
 - If quorum is reached and For > Against, the proposal moves to "Queued" status
 - If quorum is not reached or Against ≥ For, the proposal moves to "Failed" status
-- If queued, a timelock countdown starts (default: 12 hours)
+- If queued, a timelock countdown starts (default: 48 hours)
 
 ### Step 5: Confirm Finalization
 
@@ -215,7 +215,7 @@ After the transaction confirms, the proposal page will show:
 
 ### Step 1: Wait for Timelock to Expire
 
-If the proposal passed and is "Queued," wait for the timelock period (default: 12 hours). The guardian can veto during this window. After the timelock ends, `execute()` must run within `execution_grace_period` ledgers (default: 17,280, about 24 hours) or the proposal expires.
+If the proposal passed and is "Queued," wait for the timelock period (default: 48 hours). The guardian can veto during this window. After the timelock ends, `execute()` must run within `execution_grace_period` ledgers (default: 17,280, about 24 hours) or the proposal expires.
 
 ### Step 2: Check for Guardian Veto
 
@@ -296,7 +296,7 @@ After the transaction confirms, the proposal page will show:
 "Let's vote on this proposal. Navigate to the proposals page and click on the active proposal. Review the details, then check your voting power above the vote buttons. I'll vote 'For' by clicking the button. Approve the transaction in Freighter. Your vote is now recorded, and the tallies update."
 
 **[4:30-5:30] Finalize Proposal**
-"Voting remains open for 24 hours. Once the period ends, anyone can finalize the proposal. Click 'Finalize' and approve the transaction. The contract checks if quorum was reached and if For votes exceeded Against. In this case, the proposal passes and enters the 12-hour timelock."
+"Voting remains open for 24 hours. Once the period ends, anyone can finalize the proposal. Click 'Finalize' and approve the transaction. The contract checks if quorum was reached and if For votes exceeded Against. In this case, the proposal passes and enters the 48-hour timelock."
 
 **[5:30-6:00] Conclusion**
 "That's the full flow: connect, create, vote, and finalize. After the timelock, the proposal can be executed (though execution is not yet implemented). Try it yourself on testnet, and let us know if you have questions!"

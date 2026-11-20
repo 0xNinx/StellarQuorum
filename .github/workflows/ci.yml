@@ -266,15 +266,14 @@ jobs:
       # visible in a normal code review instead of buried in workflow YAML.
       - name: cargo audit
         run: cd contracts && cargo audit --config audit.toml
-      # Issue #336: fails on any dependency whose license is not on the
-      # permissive allowlist in contracts/deny.toml (documented in
-      # docs/dependency-licenses.md). cargo audit catches known
-      # vulnerabilities; this catches a copyleft license arriving unnoticed
-      # and surfacing later in a downstream integrator's legal review.
+      # Issues #336 and #400: fail on disallowed licenses, duplicate crate
+      # versions outside contracts/deny.toml's documented exceptions, and any
+      # source outside crates.io. The allowlist is documented in
+      # docs/dependency-licenses.md; cargo audit covers known vulnerabilities.
       - name: Install cargo-deny
         uses: taiki-e/install-action@cargo-deny
-      - name: cargo deny (licenses)
-        run: cd contracts && cargo deny check licenses
+      - name: cargo deny (licenses, bans, sources)
+        run: cd contracts && cargo deny check licenses bans sources
       # Issue #180: makes "measurable reduction in job duration" checkable from the
       # run itself rather than by eyeballing two runs side by side. If the cache
       # ever regresses to a miss, the summary says so on the run that shows it.

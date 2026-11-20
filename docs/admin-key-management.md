@@ -189,7 +189,7 @@ await client.initialize({
   admin: adminMultisig,
   quorum_bps: 400, // 4%
   voting_period: 17280, // 24 hours
-  timelock_period: 8640, // 12 hours
+  timelock_period: 34560, // 48 hours
   proposal_threshold: 50000 // 50,000 tokens
 });
 ```

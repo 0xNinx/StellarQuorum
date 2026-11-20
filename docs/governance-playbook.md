@@ -42,7 +42,7 @@ Quorum's governance parameters are set at initialization and cannot be changed. 
 |-----------|---------------------------|-----------|
 | `quorum_bps` | 500 (5%) | 5% balances participation vs. capture resistance |
 | `voting_period` | 17,280 (~24 hours) | Global access vs. speed |
-| `timelock_period` | 8,640 (~12 hours) | Security review vs. execution speed |
+| `timelock_period` | 34,560 (~48 hours) | Security review vs. execution speed |
 | `proposal_threshold` | 500,000,000,000 (50,000 tokens) | Spam prevention vs. accessibility |
 
 **If your protocol is high-risk or handles large treasury values:**
@@ -213,7 +213,7 @@ This is a starting configuration for a "typical" small DeFi protocol (e.g., a DE
 |-----------|-------|-----------|
 | `quorum_bps` | 500 (5%) | 5% balances participation with 10M supply = 500k tokens must vote |
 | `voting_period` | 17,280 (~24 hours) | 24 hours covers all timezones, reasonable for routine proposals |
-| `timelock_period` | 8,640 (~12 hours) | 12 hours gives guardian time to review |
+| `timelock_period` | 34,560 (~48 hours) | 48 hours gives guardian time to review |
 | `proposal_threshold` | 500,000,000,000 (50,000 tokens) | 0.5% of 10M supply, meaningful stake without excluding mid-size holders |
 
 ### Security Configuration
