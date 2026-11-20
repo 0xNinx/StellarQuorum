@@ -37,7 +37,6 @@ pub enum GovernanceError {
     BelowProposalThreshold  = 9,
     InvalidVoteChoice       = 10,
     VotingPeriodEnded       = 11,
-    ActionAddedAfterVotingStarted = 20, // #406
     TimelockNotExpired      = 12,
     Overflow                = 13,
     NoVotingPower           = 14,
@@ -64,6 +63,7 @@ pub enum GovernanceError {
     TooManyActions          = 35,
     ActionFailed            = 36,
     TokenDelegationFailed  = 37,
+    ActionAddedAfterVotingStarted = 38,
 }
 
 /// Basis-point denominator: `quorum_bps` of 500 means 5% of total supply.
@@ -616,9 +616,12 @@ impl GovernanceContract {
         Self::touch_vote(&env, proposal_id, &voter);
         Self::touch_persistent(&env, &DataKey::VoteWeight(proposal_id, voter.clone()));
         Self::touch_instance(&env);
-        Self::update_stats(&env, |stats| {
-            stats.votes_cast = stats.votes_cast.saturating_add(1);
-        });
+        // Only increment votes_cast on first vote, not on vote changes
+        if previous.is_none() {
+            Self::update_stats(&env, |stats| {
+                stats.votes_cast = stats.votes_cast.saturating_add(1);
+            });
+        }
 
         env.events().publish(
             (Symbol::new(&env, "vote_cast"), proposal_id, voter.clone()),
@@ -753,7 +756,7 @@ impl GovernanceContract {
 
     pub fn execute(env: Env, executor: Address, proposal_id: u64) -> Result<(), GovernanceError> {
         executor.require_auth();
-        let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
+        let config: Config = Self::require_config(&env)?;
 
         // Check if contract is paused
         if config.paused {
@@ -768,7 +771,9 @@ impl GovernanceContract {
         if env.ledger().sequence() < proposal.queue_ledger { return Err(GovernanceError::TimelockNotExpired); }
 
         // Check if execution grace period has expired
-        let execution_deadline = proposal.queue_ledger + proposal.execution_grace_period;
+        let execution_deadline = proposal.queue_ledger
+            .checked_add(proposal.execution_grace_period)
+            .ok_or(GovernanceError::Overflow)?;
         if proposal.execution_grace_period > 0 && env.ledger().sequence() > execution_deadline {
             return Err(GovernanceError::ExecutionExpired);
         }
@@ -812,7 +817,7 @@ impl GovernanceContract {
     /// Transfer governance administration. Two-step process for safety.
     /// Only the current admin may initiate the transfer.
     pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), GovernanceError> {
-        let config = Self::get_config(env.clone());
+        let config = Self::require_config(&env)?;
         config.admin.require_auth();
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
         env.events().publish(
@@ -827,7 +832,7 @@ impl GovernanceContract {
         let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
             .ok_or(GovernanceError::Unauthorized)?;
         pending.require_auth();
-        let mut config = Self::get_config(env.clone());
+        let mut config = Self::require_config(&env)?;
         let previous_admin = config.admin.clone();
         config.admin = pending.clone();
         env.storage().instance().set(&DataKey::Config, &config);
@@ -1260,7 +1265,7 @@ impl GovernanceContract {
     }
 
     pub fn cancel_admin_transfer(env: Env) -> Result<(), GovernanceError> {
-        let config = Self::get_config(env.clone());
+        let config = Self::require_config(&env)?;
         config.admin.require_auth();
         env.storage().instance().remove(&DataKey::PendingAdmin);
         env.events().publish(
@@ -1275,7 +1280,7 @@ impl GovernanceContract {
     /// Idempotent: calling pause() when already paused returns Ok.
     pub fn pause(env: Env, caller: Address) -> Result<(), GovernanceError> {
         caller.require_auth();
-        let mut config = Self::get_config(env.clone());
+        let mut config = Self::require_config(&env)?;
 
         if caller != config.admin && caller != config.guardian {
             return Err(GovernanceError::Unauthorized);
@@ -1298,7 +1303,7 @@ impl GovernanceContract {
     /// Unpause the contract. Only admin can unpause.
     /// Idempotent: calling unpause() when already unpaused returns Ok.
     pub fn unpause(env: Env) -> Result<(), GovernanceError> {
-        let mut config = Self::get_config(env.clone());
+        let mut config = Self::require_config(&env)?;
         config.admin.require_auth();
 
         if !config.paused {
@@ -1352,7 +1357,7 @@ impl GovernanceContract {
         let proposal: Proposal = env.storage().persistent()
             .get(&DataKey::Proposal(proposal_id)).ok_or(GovernanceError::ProposalNotFound)?;
 
-        let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
+        let config: Config = Self::require_config(&env)?;
         let voting_power = TokenClient::new(&env, &config.token)
             .get_past_votes(&voter, &proposal.snapshot_ledger);
 
@@ -1364,7 +1369,7 @@ impl GovernanceContract {
     pub fn mark_expired(env: Env, proposal_id: u64) -> Result<(), GovernanceError> {
         let mut proposal: Proposal = env.storage().persistent()
             .get(&DataKey::Proposal(proposal_id)).ok_or(GovernanceError::ProposalNotFound)?;
-        let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
+        let config: Config = Self::require_config(&env)?;
         if config.paused {
             return Err(GovernanceError::ContractPaused);
         }
@@ -1372,7 +1377,9 @@ impl GovernanceContract {
             return Err(GovernanceError::ProposalNotPassed);
         }
 
-        let execution_deadline = proposal.queue_ledger + proposal.execution_grace_period;
+        let execution_deadline = proposal.queue_ledger
+            .checked_add(proposal.execution_grace_period)
+            .ok_or(GovernanceError::Overflow)?;
 
         if proposal.execution_grace_period > 0 && env.ledger().sequence() > execution_deadline {
             proposal.status = ProposalStatus::Expired;
