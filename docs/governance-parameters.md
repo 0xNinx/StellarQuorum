@@ -35,6 +35,7 @@ Quorum's governance parameters are set once at initialization and cannot be chan
 **Reasoning:** 24 hours covers all major timezones at least once. For higher-stakes proposals (parameter changes, treasury movements), consider 51,840 (~3 days) by deploying a second governance instance with a longer window.
 
 **How to revisit:** Check vote distribution across hours. If votes cluster in one timezone, increase the period.
+**Maximum safe value:** the time from proposal creation (the snapshot ledger) to `end_ledger` must stay under the token's `CHECKPOINT_RETENTION` of 60 days, which is 1,036,800 ledgers (`LEDGERS_PER_DAY * 60` in `contracts/token/src/lib.rs`). The token prunes balance checkpoints older than that window on every balance change, and a snapshot older than the window reads as `0`. Votes cast late in a longer voting period could therefore count less power than the voter held at the snapshot. Keep `voting_period` (plus any delay before voting starts) well below 1,036,800, or raise `CHECKPOINT_RETENTION` in the token first. See [Checkpoint growth](../contracts/token/README.md#checkpoint-growth).
 
 ---
 
