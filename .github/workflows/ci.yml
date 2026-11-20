@@ -319,14 +319,13 @@ jobs:
       # reached main freely.
       - name: Lint
         run: cd frontend && npm run lint
-      # Issue #177: real test script, no longer --passWithNoTests.
-      # Issue #168 / #169: --ci makes Jest refuse to write or accept a
-      # snapshot baseline, so a visual or accessibility regression fails the
-      # run instead of silently rewriting components/__snapshots__/. Refresh
-      # baselines locally with `npm run test:update` and review the diff.
+      # Issue #401: if: always() so test and build results appear even when lint fails.
       - name: Test
+        if: always()
         run: cd frontend && npm test -- --ci
-      - run: cd frontend && npm run build
+      - name: Build
+        if: always()
+        run: cd frontend && npm run build
       # Issue #179: fails on any high/critical advisory and prints the
       # advisory + dependency path (npm audit's default human output).
       - name: npm audit (high + critical)
@@ -406,9 +405,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
       - name: Install Python SDK from source
-        run: python -m pip install './sdk/python[test]' build
+        run: python -m pip install './sdk/python[test]' build ruff mypy
+      # #399: lint and type-check the SDK before running tests
+      - name: Lint (ruff)
+        run: ruff check sdk/python/src
+      - name: Type-check (mypy)
+        run: mypy sdk/python/src
       - name: Test read-only queries and shared XDR fixtures
         run: python -m pytest sdk/python/tests
       - name: Build Python source and wheel distributions
