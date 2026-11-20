@@ -1,10 +1,10 @@
-import { Address, nativeToScVal } from '@stellar/stellar-sdk';
+import { rpc } from '@stellar/stellar-sdk';
 import { jest } from '@jest/globals';
 import { QuorumClient, TESTNET } from '../src/client';
 import type { QuorumClientConfig } from '../src/types';
 
-const getAccount = jest.spyOn(require('@stellar/stellar-sdk').rpc.Server.prototype, 'getAccount');
-const prepareTransaction = jest.spyOn(require('@stellar/stellar-sdk').rpc.Server.prototype, 'prepareTransaction');
+const getAccount = jest.spyOn(rpc.Server.prototype, 'getAccount');
+const prepareTransaction = jest.spyOn(rpc.Server.prototype, 'prepareTransaction');
 
 const CONTRACT = 'CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526';
 const ADMIN = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
@@ -21,10 +21,6 @@ const mockAccount = {
   account_id: ADMIN,
   sequence: '123',
 };
-
-const mockTransaction = (xdr: string) => ({
-  toXDR: () => xdr,
-});
 
 afterEach(() => {
   getAccount.mockReset();

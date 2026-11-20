@@ -1,8 +1,24 @@
+/** Statuses stored directly on-chain by the governance contract. */
 export type ProposalStatus =
-  | 'Pending' | 'Active' | 'Passed' | 'Failed'
-  | 'Queued'  | 'Executed' | 'Cancelled';
+  | 'Active' | 'Failed' | 'Queued' | 'Executed' | 'Cancelled'
+  | 'Expired' | 'Vetoed';
+
+/**
+ * Derived client-side phases computed from on-chain status + ledger timing.
+ * Not stored on-chain; use these in UI display logic only.
+ */
+export type ProposalPhase = 'Pending' | 'Voting' | 'TimelockPending' | ProposalStatus;
 
 export type VoteSupport = 0 | 1 | 2; // 0=Against 1=For 2=Abstain
+
+export type ProposalKind = 'Standard' | 'Upgrade';
+
+/** On-chain action attached to an executable proposal. */
+export interface ProposalAction {
+  targetContractId: string;
+  functionName: string;
+  args: unknown[];
+}
 
 export interface Proposal {
   id: bigint;
@@ -18,6 +34,14 @@ export interface Proposal {
   queueLedger: number;
   quorumRequired: bigint;
   status: ProposalStatus;
+  /** Ledger sequence at which the timelock expires and execution is allowed. */
+  timelockPeriod: number;
+  /** Ledger sequence after queue_ledger by which execution must occur. */
+  executionGracePeriod: number;
+  /** Optional IPFS or HTTPS URI for extended proposal metadata. */
+  metadataUri?: string;
+  /** Whether this is a standard governance call or a contract upgrade. */
+  kind: ProposalKind;
 }
 
 export interface ConvictionTally {
@@ -33,6 +57,22 @@ export interface GovernanceConfig {
   timelockPeriod: number;
   proposalThreshold: bigint;
   admin: string;
+  /** Address allowed to veto proposals before execution. */
+  guardian: string;
+  /** Seconds after timelock expiry during which execution is still permitted. */
+  executionGracePeriod: number;
+  /** Whether the governance contract is currently paused. */
+  paused: boolean;
+  /** Token amount the proposer must lock when submitting a proposal. */
+  proposalDeposit: bigint;
+  /** Minimum seconds a proposer must wait before submitting another proposal. */
+  proposerCooldown: number;
+}
+
+/** Deployed contract versions reported by each contract's `version()` method. */
+export interface ContractVersions {
+  governance: string;
+  token: string;
 }
 
 export interface QuorumClientConfig {
@@ -118,4 +158,16 @@ export interface NetworkConfig {
 export interface GetProposalsOptions extends ReadOptions {
   limit?: number;
   offset?: number;
+}
+
+/** Aggregate governance statistics returned by `getGovernanceStats()`. */
+export interface GovernanceStats {
+  totalProposals: number;
+  activeProposals: number;
+  queuedProposals: number;
+  executedProposals: number;
+  failedProposals: number;
+  cancelledProposals: number;
+  expiredProposals: number;
+  vetoedProposals: number;
 }

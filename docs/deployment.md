@@ -13,6 +13,7 @@ This guide walks through deploying the Quorum governance contracts to Stellar te
 
 ```bash
 NETWORK=testnet SOURCE_ACCOUNT=G... bash scripts/deploy.sh
+# optional: GUARDIAN=G... EXECUTION_GRACE_PERIOD=17280
 ```
 
 The script will:
@@ -37,23 +38,27 @@ Initialized with the following default parameters:
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
+| `guardian` | `SOURCE_ACCOUNT` (override with `GUARDIAN`) | Address that can veto queued proposals during the timelock |
 | `quorum_bps` | 500 | 5% of circulating supply must vote for quorum |
 | `voting_period` | 17,280 ledgers | ~24 hours (at ~5s/ledger) |
 | `timelock_period` | 8,640 ledgers | ~12 hours |
+| `execution_grace_period` | 17,280 ledgers | ~24 hours to execute after the timelock before the proposal expires (0 disables expiry) |
 | `proposal_threshold` | 500,000,000,000 | 50,000 QUORUM minimum to create a proposal |
 
 See [governance-parameters.md](./governance-parameters.md) for guidance on choosing these values.
 
 ## Initialization Parameters
 
-The `initialize` call sets all governance parameters **once**. There is no `update_config()` — these values are permanent for the life of the contract instance. Choose carefully.
+The `initialize` call takes nine arguments and sets them **once**; the contract has no `update_config()`. Only the proposal deposit, the proposer cooldown and the guardian can be changed later, through their own admin calls. Choose carefully.
 
 ```
 --admin <ADDRESS>          The deployer address (can cancel proposals)
+--guardian <ADDRESS>       Can veto queued proposals during the timelock
 --token <TOKEN_ID>         The QUORUM token contract address
 --quorum_bps <U32>         Quorum threshold in basis points (e.g. 500 = 5%)
 --voting_period <U32>      Voting window in ledgers (17,280 ≈ 1 day)
 --timelock_period <U32>    Timelock delay in ledgers (8,640 ≈ 12 hours)
+--execution_grace_period <U32> Ledgers after the timelock in which execute() must run (0 = no expiry)
 --proposal_threshold <I128> Minimum token balance to create a proposal (in smallest units)
 ```
 
@@ -131,12 +136,14 @@ only changes when that pin is bumped in a reviewed change.
 
 ## Environment Variables
 
-Add these to your `.env.local` for the frontend:
+Add these to `frontend/.env.local` (see `frontend/.env.example` for every variable):
 
 ```bash
-NEXT_PUBLIC_GOVERNANCE_CONTRACT=<GOV_ID>
-NEXT_PUBLIC_TOKEN_CONTRACT=<TOKEN_ID>
-NEXT_PUBLIC_STELLAR_NETWORK=testnet
+NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID=<GOV_ID>
+NEXT_PUBLIC_TOKEN_CONTRACT_ID=<TOKEN_ID>
+NEXT_PUBLIC_STELLAR_RPC_URL=https://soroban-testnet.stellar.org
+NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+NEXT_PUBLIC_USE_FIXTURE=0
 ```
 
 ## Troubleshooting

@@ -73,7 +73,7 @@ echo "TOKEN_ID=$TOKEN_ID"
 
 Periods are in ledgers (about 5 seconds each). For a quick end-to-end run, use a short `--voting_period` and `--timelock_period` such as `60` (about 5 minutes) so you are not waiting a day between steps. [Governance Parameters](governance-parameters.md) explains how to choose production values, and [Deployment](deployment.md) covers the deployment process in more detail.
 
-> `scripts/deploy.sh` does the same thing in one command, but its governance `initialize` call predates the `guardian` and `execution_grace_period` arguments. Use the commands above until the script is updated.
+> `scripts/deploy.sh` does the same thing in one command. It sets the guardian to the deployer unless `GUARDIAN` is given.
 
 Record your contract IDs. You can inspect both on Stellar Expert:
 

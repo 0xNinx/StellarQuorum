@@ -40,3 +40,10 @@ path = "fuzz_targets/finalize.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "execute"
+path = "fuzz_targets/execute.rs"
+test = false
+doc = false
+bench = false

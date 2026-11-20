@@ -8,6 +8,7 @@ const config: Record<ProposalStatus, { label: string; classes: string; dot?: str
   pending:   { label: t("common.pending"),   classes: "bg-amber-900/50 text-amber-300 border border-amber-700" },
   executed:  { label: t("common.executed"),  classes: "bg-purple-900/50 text-purple-300 border border-purple-700" },
   cancelled: { label: t("common.cancelled"), classes: "bg-slate-800 text-slate-400 border border-slate-600" },
+  vetoed:    { label: t("common.vetoed"),    classes: "bg-rose-950/70 text-rose-300 border border-rose-700" },
 };
 
 export default function StatusBadge({ status }: { status: ProposalStatus }) {

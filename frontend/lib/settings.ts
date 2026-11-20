@@ -27,3 +27,23 @@ export function isValidRpcUrl(value: string): boolean {
     return false;
   }
 }
+
+/**
+ * Issue #510: the CSP `connect-src` (next.config.ts) only permits
+ * `https://*.stellar.org` and the deployment's own RPC origin, so a saved
+ * override outside those would be blocked by the browser. Empty is allowed.
+ */
+export function isRpcUrlAllowedByCsp(
+  value: string,
+  deploymentRpcUrl: string | undefined = process.env.NEXT_PUBLIC_STELLAR_RPC_URL,
+): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === "https:" && url.hostname.endsWith(".stellar.org")) return true;
+    return !!deploymentRpcUrl && url.origin === new URL(deploymentRpcUrl).origin;
+  } catch {
+    return false;
+  }
+}

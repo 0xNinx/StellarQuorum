@@ -179,6 +179,27 @@ export const PROPOSALS: Proposal[] = [
       { voter: "GJKL...3MNO", choice: "against", weight: 300000, timestamp: "2026-03-17T14:00:00Z" },
     ],
   },
+  {
+    id: "QIP-009",
+    title: "Vetoed Treasury Withdrawal",
+    description: "A treasury withdrawal was vetoed during its timelock window.",
+    proposer: "GPROPOSER...9XYZ",
+    status: "vetoed",
+    startTime: "2026-06-01T00:00:00Z",
+    endTime: "2026-06-08T00:00:00Z",
+    snapshotLedger: 61_500_000,
+    forVotes: 800000,
+    againstVotes: 10000,
+    abstainVotes: 20000,
+    quorumRequired: 500000,
+    category: "Treasury",
+    actions: [],
+    votes: [],
+    veto: {
+      guardian: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      reason: "The recipient address has not completed treasury due diligence.",
+    },
+  },
 ];
 
 export async function getProposals(): Promise<Proposal[]> {
@@ -195,7 +216,11 @@ export async function getProposalById(id: string): Promise<Proposal | undefined>
   if (!match) return undefined;
   const client = await createQuorumClient();
   const [proposal, latestLedger] = await Promise.all([client.getProposal(BigInt(match[1])), client.getLatestLedger()]);
-  return proposal ? toUiProposal(proposal, latestLedger) : undefined;
+  if (!proposal) return undefined;
+  const uiProposal = toUiProposal(proposal, latestLedger);
+  if (proposal.status !== "Vetoed") return uiProposal;
+  const veto = await client.getProposalVetoEvent(proposal.id);
+  return veto ? { ...uiProposal, veto: { guardian: veto.guardian, reason: veto.reason } } : uiProposal;
 }
 
 /**

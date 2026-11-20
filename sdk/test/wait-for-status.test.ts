@@ -31,8 +31,8 @@ afterEach(() => simulate.mockReset());
 describe('waitForProposalStatus (issue #274)', () => {
   it('resolves as soon as the target status is observed', async () => {
     simulate
-      .mockResolvedValueOnce(proposalAt('Passed'))
-      .mockResolvedValueOnce(proposalAt('Passed'))
+      .mockResolvedValueOnce(proposalAt('Active'))
+      .mockResolvedValueOnce(proposalAt('Active'))
       .mockResolvedValueOnce(proposalAt('Queued'));
 
     const proposal = await client.waitForProposalStatus(7n, 'Queued');

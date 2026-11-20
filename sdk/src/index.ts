@@ -1,8 +1,10 @@
-export { QuorumClient, TESTNET, MAINNET, ProposalStatusTimeoutError } from './client.js';
-export { GovernanceError, TokenError, RpcTimeoutError, TransactionFailedError, contractErrorCode, parseGovernanceError, parseTokenError } from './errors.js';
+export { QuorumClient, TESTNET, MAINNET, ProposalStatusTimeoutError, SUPPORTED_CONTRACT_VERSION_RANGE, mapGovernanceSimulationError } from './client.js';
+export { GovernanceContractError, GOVERNANCE_ERROR_MESSAGES, GovernanceError, TokenError, RpcTimeoutError, TransactionFailedError, contractErrorCode, governanceErrorFromCode, parseGovernanceError, parseTokenError } from './errors.js';
 export { EVENT_TOPICS, EventDecodeError, decodeEvent, decodeEvents } from './events.js';
 export type {
   AdminTransferredEvent,
+  AdminTransferProposedEvent,
+  AdminTransferCancelledEvent,
   ApproveEvent,
   BurnEvent,
   ContractInitializedEvent,
@@ -15,6 +17,7 @@ export type {
   ProposalActionSetEvent,
   ProposalCancelledEvent,
   ProposalCreatedEvent,
+  ProposalExpiredEvent,
   ProposalDepositUpdatedEvent,
   ProposalExecutedEvent,
   ProposalFinalizedEvent,
@@ -25,6 +28,8 @@ export type {
   QuorumEventType,
   RawContractEvent,
   StakedEvent,
+  StakeIncreasedEvent,
+  StakeExtendedEvent,
   TargetAllowlistUpdatedEvent,
   TransferEvent,
   UnstakedEvent,

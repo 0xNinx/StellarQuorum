@@ -215,11 +215,11 @@ After the transaction confirms, the proposal page will show:
 
 ### Step 1: Wait for Timelock to Expire
 
-If the proposal passed and is "Queued," wait for the timelock period (default: 12 hours). The guardian multisig can veto during this window.
+If the proposal passed and is "Queued," wait for the timelock period (default: 12 hours). The guardian can veto during this window. After the timelock ends, `execute()` must run within `execution_grace_period` ledgers (default: 17,280, about 24 hours) or the proposal expires.
 
 ### Step 2: Check for Guardian Veto
 
-Before executing, verify the proposal is still "Queued" (not "Cancelled" by guardian).
+Before executing, verify the proposal is still "Queued" (not "Vetoed" by the guardian, and not "Expired").
 
 ### Step 3: Click "Execute"
 

@@ -42,6 +42,18 @@
       "returns": "Promise<Proposal | null>"
     },
     {
+      "name": "getProposalVetoEvent",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<ProposalVetoedEvent | null>"
+    },
+    {
       "name": "getProposalCount",
       "parameters": [
         {
@@ -144,6 +156,11 @@
       "returns": "Promise<GovernanceConfig>"
     },
     {
+      "name": "getContractVersions",
+      "parameters": [],
+      "returns": "Promise<ContractVersions>"
+    },
+    {
       "name": "hasVoted",
       "parameters": [
         {
@@ -237,14 +254,8 @@
       "name": "getProposalsByProposer",
       "parameters": [
         {
-          "name": "proposer",
-          "type": "string",
-          "optional": false,
-          "rest": false
-        },
-        {
           "name": "options",
-          "type": "ReadOptions",
+          "type": "GetProposalsOptions",
           "optional": true,
           "rest": false
         }
@@ -678,6 +689,42 @@
       "returns": "Promise<string>"
     },
     {
+      "name": "buildMarkExpired",
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildExtendProposalTtl",
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
       "name": "buildTransfer",
       "parameters": [
         {
@@ -993,26 +1040,14 @@
           "rest": false
         }
       ],
-      "returns": "Promise<string>"
+      "returns": "Promise<boolean>"
     },
     {
-      "name": "buildUpgrade",
+      "name": "getGovernanceStats",
       "parameters": [
         {
-          "name": "admin",
-          "type": "string",
-          "optional": false,
-          "rest": false
-        },
-        {
-          "name": "newWasmHash",
-          "type": "string",
-          "optional": false,
-          "rest": false
-        },
-        {
-          "name": "source",
-          "type": "string",
+          "name": "options",
+          "type": "ReadOptions",
           "optional": true,
           "rest": false
         }
@@ -1055,7 +1090,9 @@
       "NotExecutable": 31,
       "ProposalNotCancellable": 32,
       "ProposerOnCooldown": 33,
-      "VotingNotStarted": 34
+      "VotingNotStarted": 34,
+      "TooManyActions": 35,
+      "ActionFailed": 36
     },
     "TokenError": {
       "AlreadyInitialized": 1,
@@ -1066,7 +1103,11 @@
       "Overflow": 6,
       "InvalidExpiration": 7,
       "InvalidSupply": 8,
-      "InvalidDecimals": 9
+      "InvalidDecimals": 9,
+      "NotStaked": 12,
+      "AlreadyStaked": 11,
+      "LockNotExpired": 13,
+      "InvalidDuration": 10
     }
   }
 }

@@ -2,7 +2,9 @@ import { rpc, Contract, Transaction, TransactionBuilder, BASE_FEE, nativeToScVal
 import type { Proposal, ConvictionTally, GovernanceConfig, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions } from './types.js';
 import { ReadCache } from './cache.js';
 import { SimulationBatcher, postSimulationBatch } from './batch.js';
-import { GovernanceError, parseGovernanceError, RpcTimeoutError, TransactionFailedError, contractErrorCode } from './errors.js';
+import { GovernanceContractError, GOVERNANCE_ERROR_MESSAGES, GovernanceError, governanceErrorFromCode, parseGovernanceError, RpcTimeoutError, TransactionFailedError, contractErrorCode } from './errors.js';
+import { decodeEvent } from './events.js';
+import type { ProposalVetoedEvent } from './events.js';
 
 /**
  * Source account used for read-only simulation.
@@ -52,6 +54,16 @@ export const DEFAULT_RETRY_JITTER_MS = 50;
 export const DEFAULT_POLL_INTERVAL_MS = 1_000;
 export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 60_000;
 
+/** SDK 0.2.x is built against the 0.1.x governance and token ABIs. */
+export const SUPPORTED_CONTRACT_VERSION_RANGE = '>=0.1.0 <0.2.0';
+
+function isSupportedContractVersion(version: string): boolean {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/u.exec(version);
+  if (!match) return false;
+  const [, major, minor] = match;
+  return Number(major) === 0 && Number(minor) === 1;
+}
+
 // ─── Typed governance errors (issue #115) ────────────────────────────────────
 // The contract surfaces failures as `GovernanceError` codes; a simulation
 // failure string looks like `... Error(Contract, #12) ...`. These map the
@@ -59,13 +71,17 @@ export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 60_000;
 // instead of parsing strings.
 
 export class ProposalNotFoundError extends Error {
-  constructor(proposalId?: bigint | string) {
-    super(`Proposal not found${proposalId !== undefined ? `: ${String(proposalId)}` : ''}`);
+  readonly code = GovernanceError.ProposalNotFound;
+
+  constructor(proposalId?: bigint | string, message?: string) {
+    super(message ?? `Proposal not found${proposalId !== undefined ? `: ${String(proposalId)}` : ''}`);
     this.name = 'ProposalNotFoundError';
   }
 }
 
 export class VotingNotActiveError extends Error {
+  readonly code = GovernanceError.VotingNotActive;
+
   constructor(message = 'Voting window is still open; proposal cannot be finalized yet') {
     super(message);
     this.name = 'VotingNotActiveError';
@@ -73,6 +89,8 @@ export class VotingNotActiveError extends Error {
 }
 
 export class ProposalNotPassedError extends Error {
+  readonly code = GovernanceError.ProposalNotPassed;
+
   constructor(message = 'Proposal is not queued and cannot be executed') {
     super(message);
     this.name = 'ProposalNotPassedError';
@@ -80,6 +98,8 @@ export class ProposalNotPassedError extends Error {
 }
 
 export class TimelockNotExpiredError extends Error {
+  readonly code = GovernanceError.TimelockNotExpired;
+
   constructor(message = 'Timelock has not expired; proposal cannot be executed yet') {
     super(message);
     this.name = 'TimelockNotExpiredError';
@@ -87,6 +107,8 @@ export class TimelockNotExpiredError extends Error {
 }
 
 export class UnauthorizedError extends Error {
+  readonly code = GovernanceError.Unauthorized;
+
   constructor(message = 'Caller is not authorized for this action') {
     super(message);
     this.name = 'UnauthorizedError';
@@ -111,24 +133,24 @@ export class ProposalStatusTimeoutError extends Error {
   }
 }
 
-function mapGovernanceSimulationError(method: string, raw: unknown): Error {
+export function mapGovernanceSimulationError(method: string, raw: unknown): Error {
   const message = raw instanceof Error ? raw.message : String(raw);
-  if (/#\s*3\b/.test(message) || /ProposalNotFound/.test(message)) {
-    return new ProposalNotFoundError();
+  const code = contractErrorCode(message);
+  const namedCode = Object.entries(GovernanceError).find(([name, value]) =>
+    typeof value === 'number' && message.includes(name),
+  )?.[1];
+  const governanceCode = code === undefined ? namedCode as GovernanceError | undefined : governanceErrorFromCode(code);
+  if (governanceCode === undefined) return new Error(`Simulation of ${method} failed: ${message}`);
+
+  const detail = `Simulation of ${method} failed: ${GOVERNANCE_ERROR_MESSAGES[governanceCode]} (${message})`;
+  switch (governanceCode) {
+    case GovernanceError.ProposalNotFound: return new ProposalNotFoundError(undefined, detail);
+    case GovernanceError.VotingNotActive: return new VotingNotActiveError(detail);
+    case GovernanceError.ProposalNotPassed: return new ProposalNotPassedError(detail);
+    case GovernanceError.TimelockNotExpired: return new TimelockNotExpiredError(detail);
+    case GovernanceError.Unauthorized: return new UnauthorizedError(detail);
+    default: return new GovernanceContractError(governanceCode, detail);
   }
-  if (/#\s*4\b/.test(message) || /VotingNotActive/.test(message)) {
-    return new VotingNotActiveError(`Simulation of ${method} failed: voting is not active (${message})`);
-  }
-  if (/#\s*7\b/.test(message) || /ProposalNotPassed/.test(message)) {
-    return new ProposalNotPassedError(`Simulation of ${method} failed: proposal has not passed (${message})`);
-  }
-  if (/#\s*12\b/.test(message) || /TimelockNotExpired/.test(message)) {
-    return new TimelockNotExpiredError(`Simulation of ${method} failed: timelock not expired (${message})`);
-  }
-  if (/#\s*2\b/.test(message) || /Unauthorized/.test(message)) {
-    return new UnauthorizedError(`Simulation of ${method} failed: unauthorized (${message})`);
-  }
-  return new Error(`Simulation of ${method} failed: ${message}`);
 }
 
 export class QuorumClient {
@@ -182,6 +204,39 @@ export class QuorumClient {
     });
   }
 
+  /**
+   * Returns the on-chain veto event for a vetoed proposal, including its
+   * guardian and required reason. The event is searched only over that
+   * proposal's timelock window, using Soroban RPC's event filters.
+   */
+  async getProposalVetoEvent(id: bigint): Promise<ProposalVetoedEvent | null> {
+    const proposal = await this.getProposal(id);
+    if (!proposal || proposal.status !== 'Vetoed' || proposal.queueLedger === 0) return null;
+
+    const startLedger = Math.max(1, proposal.queueLedger - proposal.timelockPeriod);
+    const endLedger = proposal.queueLedger - 1;
+    if (startLedger > endLedger) return null;
+
+    const topic = nativeToScVal('proposal_vetoed', { type: 'symbol' }).toXDR('base64');
+    const proposalTopic = nativeToScVal(id, { type: 'u64' }).toXDR('base64');
+    const response = await this.read('getProposalVetoEvent', () => this.server.getEvents({
+      startLedger,
+      endLedger,
+      limit: 100,
+      filters: [{
+        type: 'contract',
+        contractIds: [this.config.governanceContractId],
+        topics: [[topic, proposalTopic]],
+      }],
+    }));
+
+    for (const event of response.events) {
+      const decoded = decodeEvent(event);
+      if (decoded?.type === 'proposal_vetoed' && decoded.id === id) return decoded;
+    }
+    return null;
+  }
+
   async getProposalCount(options?: ReadOptions): Promise<bigint> {
     return this.cache.read('getProposalCount', [], options, async () =>
       BigInt(await this.simulate<bigint | number>('get_proposal_count')));
@@ -228,8 +283,36 @@ export class QuorumClient {
         timelockPeriod: raw.timelock_period,
         proposalThreshold: raw.proposal_threshold,
         admin: raw.admin,
+        guardian: raw.guardian ?? '',
+        executionGracePeriod: raw.execution_grace_period ?? 0,
+        paused: raw.paused ?? false,
+        proposalDeposit: raw.proposal_deposit ?? BigInt(0),
+        proposerCooldown: raw.proposer_cooldown ?? 0,
       };
     });
+  }
+
+  /**
+   * Reads both deployed contract versions and warns when either falls outside
+   * the ABI range supported by this SDK release. Call during application
+   * startup so a contract/SDK mismatch is visible before users submit a call.
+   */
+  async getContractVersions(): Promise<ContractVersions> {
+    const [governance, config] = await Promise.all([
+      this.simulate<string>('version'),
+      this.getConfig({ bypassCache: true }),
+    ]);
+    const token = await this.simulateOn<string>(new Contract(config.token), 'version');
+    const versions = { governance, token };
+    for (const [contract, version] of Object.entries(versions)) {
+      if (!isSupportedContractVersion(version)) {
+        console.warn(
+          `Quorum SDK supports contract versions ${SUPPORTED_CONTRACT_VERSION_RANGE}; ` +
+          `${contract} contract reports ${version}. Upgrade the SDK or deploy a supported contract version.`,
+        );
+      }
+    }
+    return versions;
   }
 
   async hasVoted(proposalId: bigint, voter: string, options?: ReadOptions): Promise<boolean> {
@@ -749,21 +832,25 @@ export class QuorumClient {
   // These return unsigned XDR strings — the caller signs with Freighter and submits.
 
   /**
-   * Builds signable XDR for `create_proposal(proposer, title, description)` (issue #113).
+   * Builds signable XDR for `create_proposal(proposer, title, description, metadata_uri)` (issue #113, #446).
    *
    * Creates a new governance proposal. `proposer` must sign and must hold at
    * least `proposalThreshold` tokens at the governance contract's snapshot
    * ledger. `source` pays the fee and defaults to `proposer`.
    *
+   * @param metadataUri - Optional URI linking to off-chain proposal metadata.
+   *   Defaults to `''`.  Must be passed to satisfy the contract's four-argument
+   *   signature — omitting it caused simulation failures (#446).
    * @throws {Error} proposal threshold or other contract errors.
    */
-  async buildCreateProposal(proposer: string, title: string, description: string, source?: string): Promise<string> {
+  async buildCreateProposal(proposer: string, title: string, description: string, metadataUri: string = '', source?: string): Promise<string> {
     return this.buildGovernanceTransaction(
       source ?? proposer,
       'create_proposal',
       new Address(proposer).toScVal(),
       nativeToScVal(title, { type: 'string' }),
       nativeToScVal(description, { type: 'string' }),
+      nativeToScVal(metadataUri, { type: 'string' }),
     );
   }
 
@@ -923,6 +1010,30 @@ export class QuorumClient {
     );
   }
 
+  /**
+   * Builds signable XDR for `mark_expired(proposal_id)` (issue #456).
+   * Anyone may mark an expired proposal, so `source` is the explicit fee payer.
+   */
+  async buildMarkExpired(source: string, proposalId: bigint): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source,
+      'mark_expired',
+      nativeToScVal(proposalId, { type: 'u64' }),
+    );
+  }
+
+  /**
+   * Builds signable XDR for `extend_proposal_ttl(proposal_id)` (issue #456).
+   * Anyone may extend the entry lifetime, so `source` pays the transaction fee.
+   */
+  async buildExtendProposalTtl(source: string, proposalId: bigint): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source,
+      'extend_proposal_ttl',
+      nativeToScVal(proposalId, { type: 'u64' }),
+    );
+  }
+
   // ─── Token builders (issue #117) ─────────────────────────────────────────
 
   /**
@@ -987,103 +1098,112 @@ export class QuorumClient {
     );
   }
 
-  // ─── Admin Transaction Builders ──────────────────────────────────────────
+  // ── Staking (issue #454) ─────────────────────────────────────────────────
 
-  /** Temporarily pause all contract operations. The admin must authorize. */
-  async buildPause(admin: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'pause',
-      new Address(admin).toScVal(),
-    );
-  }
-
-  /** Resume contract operations after a pause. The admin must authorize. */
-  async buildUnpause(admin: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'unpause',
-    );
-  }
-
-  /** Change the account that can veto proposals. The admin must authorize. */
-  async buildSetGuardian(admin: string, newGuardian: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'set_guardian',
-      new Address(newGuardian).toScVal(),
-    );
-  }
-
-  /** Set the deposit required to open a proposal. The admin must authorize. */
-  async buildSetProposalDeposit(admin: string, amount: bigint, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'set_proposal_deposit',
+  /**
+   * Lock `amount` tokens for `durationLedgers` ledgers to earn a vote-power boost.
+   * The staked amount is included in `lockedBalance` until the lock expires.
+   */
+  async buildStake(staker: string, amount: bigint, durationLedgers: number, source?: string): Promise<string> {
+    return this.buildTokenTransaction(
+      source ?? staker,
+      'stake',
+      new Address(staker).toScVal(),
       nativeToScVal(amount, { type: 'i128' }),
+      nativeToScVal(durationLedgers, { type: 'u32' }),
     );
   }
 
-  /** Set the minimum ledgers a proposer must wait between opening proposals. The admin must authorize. */
-  async buildSetProposerCooldown(admin: string, ledgers: number, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'set_proposer_cooldown',
-      nativeToScVal(ledgers, { type: 'u32' }),
+  /**
+   * Release a fully-expired stake back to the holder's spendable balance.
+   * Panics with `LockNotExpired` if the lock period has not passed.
+   */
+  async buildUnstake(staker: string, source?: string): Promise<string> {
+    return this.buildTokenTransaction(
+      source ?? staker,
+      'unstake',
+      new Address(staker).toScVal(),
     );
   }
 
-  /** Add a contract to the allowlist of targets a proposal can call. The admin must authorize. */
-  async buildAllowTarget(admin: string, target: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'allow_target',
-      new Address(target).toScVal(),
-    );
+  /**
+   * Amount currently locked in an active stake (zero if no active stake).
+   * Included in the holder's total balance but not in `spendableBalance`.
+   */
+  async lockedBalance(holder: string, options?: ReadOptions): Promise<bigint> {
+    return this.cache.read('lockedBalance', [holder], options, async () => {
+      const raw = await this.simulateToken<bigint | number>('locked_balance', new Address(holder).toScVal());
+      return BigInt(raw);
+    });
   }
 
-  /** Remove a contract from the allowlist of targets a proposal can call. The admin must authorize. */
-  async buildDisallowTarget(admin: string, target: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'disallow_target',
-      new Address(target).toScVal(),
-    );
+  /**
+   * Liquid (non-locked) balance: `balance - lockedBalance`.
+   * This is the amount the holder can transfer or approve immediately.
+   */
+  async spendableBalance(holder: string, options?: ReadOptions): Promise<bigint> {
+    return this.cache.read('spendableBalance', [holder], options, async () => {
+      const raw = await this.simulateToken<bigint | number>('spendable_balance', new Address(holder).toScVal());
+      return BigInt(raw);
+    });
   }
 
-  /** Initiate an admin transfer. The current admin must authorize. */
-  async buildTransferAdmin(admin: string, newAdmin: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'transfer_admin',
-      new Address(newAdmin).toScVal(),
+  /**
+   * Preview the vote-power multiplier for a given `amount` and `durationLedgers`.
+   * Returns the boosted voting power (not the multiplier ratio) as the contract
+   * would compute it via `lock_boost(amount, duration)`.
+   */
+  async previewStakeBoost(amount: bigint, durationLedgers: number, options?: ReadOptions): Promise<bigint> {
+    const raw = await this.simulateToken<bigint | number>(
+      'lock_boost',
+      nativeToScVal(amount, { type: 'i128' }),
+      nativeToScVal(durationLedgers, { type: 'u32' }),
     );
+    return BigInt(raw);
   }
 
-  /** Accept a pending admin transfer. The pending admin must authorize. */
-  async buildAcceptAdmin(pendingAdmin: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? pendingAdmin,
-      'accept_admin',
-    );
+  // ── Governance computed views (issue #455) ───────────────────────────────
+
+  /**
+   * Derived display phase for a proposal, computed server-side so the client
+   * does not need to compare ledger sequences.
+   * Returns one of: `'Pending' | 'Voting' | 'TimelockPending' | ProposalStatus`.
+   */
+  async getProposalPhase(proposalId: bigint, options?: ReadOptions): Promise<string> {
+    return this.simulate<string>('get_proposal_phase', nativeToScVal(proposalId, { type: 'u64' }));
   }
 
-  /** Cancel a pending admin transfer. The current admin must authorize. */
-  async buildCancelAdminTransfer(admin: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'cancel_admin_transfer',
-    );
+  /**
+   * Fraction of the quorum requirement satisfied so far.
+   * Returns a value in `[0, 10_000]` where 10_000 means quorum is exactly met.
+   */
+  async getQuorumProgress(proposalId: bigint, options?: ReadOptions): Promise<number> {
+    const raw = await this.simulate<number | bigint>('get_quorum_progress', nativeToScVal(proposalId, { type: 'u64' }));
+    return Number(raw);
   }
 
-  /** Replace the governance contract WASM. The admin must authorize. */
-  async buildUpgrade(admin: string, newWasmHash: string, source?: string): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? admin,
-      'upgrade',
-      new Address(admin).toScVal(),
-      nativeToScVal(newWasmHash, { type: 'bytes' }),
-    );
+  /** Whether the current for-votes satisfy the quorum requirement. */
+  async hasReachedQuorum(proposalId: bigint, options?: ReadOptions): Promise<boolean> {
+    const raw = await this.simulate<boolean>('has_reached_quorum', nativeToScVal(proposalId, { type: 'u64' }));
+    return raw === true;
+  }
+
+  /**
+   * Aggregate governance stats: proposal counts by terminal status, total supply,
+   * and participation rate.
+   */
+  async getGovernanceStats(options?: ReadOptions): Promise<GovernanceStats> {
+    const raw = await this.simulate<RawGovernanceStats>('get_governance_stats');
+    return {
+      totalProposals: Number(raw.total_proposals),
+      activeProposals: Number(raw.active_proposals),
+      queuedProposals: Number(raw.queued_proposals),
+      executedProposals: Number(raw.executed_proposals),
+      failedProposals: Number(raw.failed_proposals),
+      cancelledProposals: Number(raw.cancelled_proposals ?? 0),
+      expiredProposals: Number(raw.expired_proposals ?? 0),
+      vetoedProposals: Number(raw.vetoed_proposals ?? 0),
+    };
   }
 }
 
@@ -1137,6 +1257,10 @@ interface RawProposal {
   queue_ledger: number;
   quorum_required: bigint;
   status: [string];
+  timelock_period?: number;
+  execution_grace_period?: number;
+  metadata_uri?: string;
+  kind?: [string];
 }
 
 interface RawConfig {
@@ -1146,6 +1270,22 @@ interface RawConfig {
   timelock_period: number;
   proposal_threshold: bigint;
   admin: string;
+  guardian?: string;
+  execution_grace_period?: number;
+  paused?: boolean;
+  proposal_deposit?: bigint;
+  proposer_cooldown?: number;
+}
+
+interface RawGovernanceStats {
+  total_proposals: number | bigint;
+  active_proposals: number | bigint;
+  queued_proposals: number | bigint;
+  executed_proposals: number | bigint;
+  failed_proposals: number | bigint;
+  cancelled_proposals?: number | bigint;
+  expired_proposals?: number | bigint;
+  vetoed_proposals?: number | bigint;
 }
 
 interface RawConvictionTally {
@@ -1177,11 +1317,16 @@ function decodeProposal(raw: RawProposal): Proposal {
     queueLedger: raw.queue_ledger,
     quorumRequired: raw.quorum_required,
     status: decodeStatus(raw.status),
+    timelockPeriod: raw.timelock_period ?? 0,
+    executionGracePeriod: raw.execution_grace_period ?? 0,
+    ...(raw.metadata_uri === undefined ? {} : { metadataUri: raw.metadata_uri }),
+    kind: raw.kind ? (raw.kind[0] as 'Standard' | 'Upgrade') : 'Standard',
   };
 }
 
+/** On-chain statuses the contract can store on a Proposal. */
 const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
-  'Pending', 'Active', 'Passed', 'Failed', 'Queued', 'Executed', 'Cancelled',
+  'Active', 'Failed', 'Queued', 'Executed', 'Cancelled', 'Expired', 'Vetoed',
 ];
 
 /** Unit enum variant `[name]` → ProposalStatus, rejecting names the SDK does not know. */

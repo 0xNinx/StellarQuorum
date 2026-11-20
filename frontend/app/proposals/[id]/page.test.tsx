@@ -60,4 +60,11 @@ describe("proposal detail page", () => {
 
     expect(screen.getByRole("heading", { name: "Proposal not found" })).toBeInTheDocument();
   });
+
+  it("shows the recorded guardian and reason when a proposal was vetoed", async () => {
+    await renderDetail("QIP-009");
+    expect(screen.getByRole("note", { name: "Veto details" })).toBeInTheDocument();
+    expect(screen.getByText("The recipient address has not completed treasury due diligence.")).toBeInTheDocument();
+    expect(screen.getByText("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")).toBeInTheDocument();
+  });
 });

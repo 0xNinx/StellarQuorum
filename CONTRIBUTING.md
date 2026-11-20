@@ -519,6 +519,8 @@ The Soroban contracts in `contracts/` are the heart of Quorum. Changes here requ
 
 ### Adding a Contract Function
 
+See [docs/adding-a-contract-function.md](docs/adding-a-contract-function.md) for every file a new function touches and the check that enforces each one.
+
 1. Add the function to `contracts/governance/src/lib.rs` or `contracts/token/src/lib.rs`
 2. Follow existing patterns:
    - All state-changing functions must call `require_auth()` on the appropriate address

@@ -56,6 +56,16 @@ export default async function ProposalDetailPage({ params }: { params: Promise<{
         </div>
       </div>
 
+      {proposal.veto && (
+        <section aria-label="Veto details" role="note" className="p-5 rounded-xl bg-rose-950/30 border border-rose-800/60 mb-6">
+          <h2 className="font-semibold text-rose-200 mb-2">Proposal vetoed</h2>
+          <p className="text-sm text-slate-300 whitespace-pre-line">{proposal.veto.reason}</p>
+          <p className="mt-3 text-xs text-slate-400">
+            Guardian: <span className="font-mono text-slate-300 break-all">{proposal.veto.guardian}</span>
+          </p>
+        </section>
+      )}
+
       {/* Description */}
       <div className="p-5 rounded-xl bg-[#0d1520] border border-[#1a2535] mb-6">
         <h2 className="font-semibold text-white mb-3">{t("common.description")}</h2>

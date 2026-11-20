@@ -45,14 +45,16 @@ echo "  Governance: $GOV_ID"
 stellar contract invoke --id "$GOV_ID" --source "$SOURCE_ACCOUNT" \
   --rpc-url "$RPC_URL" --network-passphrase "$PASSPHRASE" \
   -- initialize --admin "$SOURCE_ACCOUNT" \
+  --guardian "${GUARDIAN:-$SOURCE_ACCOUNT}" \
   --token "$TOKEN_ID" --quorum_bps 500 \
   --voting_period 17280 --timelock_period 8640 \
+  --execution_grace_period "${EXECUTION_GRACE_PERIOD:-17280}" \
   --proposal_threshold 500000000000
 
 echo ""
 echo "Done. Add to your .env.local:"
-echo "NEXT_PUBLIC_GOVERNANCE_CONTRACT=$GOV_ID"
-echo "NEXT_PUBLIC_TOKEN_CONTRACT=$TOKEN_ID"
+echo "NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID=$GOV_ID"
+echo "NEXT_PUBLIC_TOKEN_CONTRACT_ID=$TOKEN_ID"
 
 # ---------------------------------------------------------------------------
 # Upgrade an already-deployed governance contract

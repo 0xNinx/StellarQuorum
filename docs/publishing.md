@@ -86,6 +86,7 @@ The [release workflow](../.github/workflows/release.yml) will:
 | Contracts | `quorum_token.wasm`, `quorum_governance.wasm` |
 | Specs | `quorum-token.spec.json`, `quorum-governance.spec.json` |
 | SDK | `@quorum/sdk@X.Y.Z` on npm |
+| Python SDK | Not published; installed from source or a Git tag. See [sdk/python/README.md](../sdk/python/README.md#development) for testing and [Releases](../sdk/python/README.md#releases) |
 | SBOMs | `quorum-contracts.cdx.json`, `quorum-sdk.cdx.json` |
 | Frontend | Built as part of CI (not published separately) |
 
