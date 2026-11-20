@@ -371,6 +371,7 @@ pub struct GovernanceStats {
     pub failed: u64,
     pub cancelled: u64,
     pub expired: u64,
+    pub vetoed: u64,
     pub votes_cast: u64,
 }
 
@@ -533,13 +534,13 @@ impl GovernanceContract {
 
     pub fn create_proposal(env: Env, proposer: Address, title: String, description: String, metadata_uri: String) -> Result<u64, GovernanceError> {
         let cosponsors = soroban_sdk::Vec::new(&env);
-        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, false)
+        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, false, ProposalKind::Executable)
     }
 
     /// As `create_proposal`, but `cosponsors` authorize the same transaction and
     /// their live balances count toward the proposal threshold. See the README.
     pub fn create_cosponsored_proposal(env: Env, proposer: Address, cosponsors: soroban_sdk::Vec<Address>, title: String, description: String, metadata_uri: String) -> Result<u64, GovernanceError> {
-        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, false)
+        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, false, ProposalKind::Executable)
     }
 
     /// As `create_proposal`, but the proposal is decided on time-decayed support
@@ -547,7 +548,15 @@ impl GovernanceContract {
     /// accumulation and decay rules.
     pub fn create_conviction_proposal(env: Env, proposer: Address, title: String, description: String, metadata_uri: String) -> Result<u64, GovernanceError> {
         let cosponsors = soroban_sdk::Vec::new(&env);
-        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, true)
+        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, true, ProposalKind::Executable)
+    }
+
+    /// Creates a signaling proposal that expresses an opinion without executing actions.
+    /// Signaling proposals go through the same vote and finalize lifecycle as executable
+    /// proposals, but `execute()` rejects them with `NotExecutable`.
+    pub fn create_signaling_proposal(env: Env, proposer: Address, title: String, description: String, metadata_uri: String) -> Result<u64, GovernanceError> {
+        let cosponsors = soroban_sdk::Vec::new(&env);
+        Self::open_proposal(&env, proposer, &cosponsors, title, description, metadata_uri, false, ProposalKind::Signaling)
     }
 
     /// Records `voter`'s choice on `proposal_id`.
@@ -600,6 +609,14 @@ impl GovernanceContract {
         let conviction_key = DataKey::Conviction(proposal_id);
         if let Some(stored) = env.storage().persistent().get::<DataKey, ConvictionTally>(&conviction_key) {
             let mut conviction = Self::decay_to(&stored, env.ledger().sequence());
+            // Remove the previous choice's conviction contribution before adding the new one.
+            if let Some(previous_support) = previous {
+                match previous_support {
+                    0 => conviction.against_conviction = Self::remove_weight(conviction.against_conviction, voting_power)?,
+                    1 => conviction.for_conviction = Self::remove_weight(conviction.for_conviction, voting_power)?,
+                    _ => {}
+                }
+            }
             match support {
                 0 => conviction.against_conviction = Self::add_weight(conviction.against_conviction, voting_power)?,
                 1 => conviction.for_conviction = Self::add_weight(conviction.for_conviction, voting_power)?,
@@ -793,9 +810,11 @@ impl GovernanceContract {
         // Commit the terminal state before dispatching any proposal actions.
         // A callee may synchronously call execute again; it must observe
         // Executed and fail rather than dispatch twice.
+        let previous = proposal.status.clone();
         proposal.status = ProposalStatus::Executed;
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
         Self::touch_proposal(&env, proposal_id);
+        Self::record_status_change(&env, &previous, &proposal.status);
 
         // A failing action returns an error instead of trapping. Returning Err
         // rolls back this whole invocation, so the proposal stays Queued and
@@ -1150,6 +1169,9 @@ impl GovernanceContract {
             return Err(GovernanceError::ActionAddedAfterVotingStarted);
         }
         if proposal.status != ProposalStatus::Active { return Err(GovernanceError::VotingNotActive); }
+        if proposal.kind == ProposalKind::Signaling {
+            return Err(GovernanceError::NotExecutable);
+        }
         if !Self::target_allowed(&env, &target) {
             return Err(GovernanceError::TargetNotAllowed);
         }
@@ -1203,9 +1225,11 @@ impl GovernanceContract {
         if proposal.status != ProposalStatus::Active || env.ledger().sequence() > proposal.end_ledger {
             return Err(GovernanceError::ProposalNotCancellable);
         }
+        let previous = proposal.status.clone();
         proposal.status = ProposalStatus::Cancelled;
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
         Self::touch_proposal(&env, proposal_id);
+        Self::record_status_change(&env, &previous, &proposal.status);
 
         // Issue #430: rule — refund the deposit when the proposer cancels
         // their own proposal before voting has started (before start_ledger);
@@ -1253,9 +1277,11 @@ impl GovernanceContract {
         if proposal.status != ProposalStatus::Queued { return Err(GovernanceError::ProposalNotPassed); }
         if env.ledger().sequence() >= proposal.queue_ledger { return Err(GovernanceError::VetoWindowClosed); }
 
+        let previous = proposal.status.clone();
         proposal.status = ProposalStatus::Vetoed;
         env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
         Self::touch_proposal(&env, proposal_id);
+        Self::record_status_change(&env, &previous, &proposal.status);
 
         env.events().publish(
             (Symbol::new(&env, "proposal_vetoed"), proposal_id),
@@ -1412,7 +1438,7 @@ impl GovernanceContract {
     /// Checks the co-sponsors, sums their live balances with the proposer's
     /// against `proposal_threshold`, takes the proposer's deposit if one is set,
     /// and records the optional co-sponsors, deposit and conviction flag.
-    fn open_proposal(env: &Env, proposer: Address, cosponsors: &soroban_sdk::Vec<Address>, title: String, description: String, metadata_uri: String, conviction: bool) -> Result<u64, GovernanceError> {
+    fn open_proposal(env: &Env, proposer: Address, cosponsors: &soroban_sdk::Vec<Address>, title: String, description: String, metadata_uri: String, conviction: bool, kind: ProposalKind) -> Result<u64, GovernanceError> {
         let config: Config = Self::require_config(env)?;
         proposer.require_auth();
         Self::validate_cosponsors(cosponsors, &proposer)?;
@@ -1496,7 +1522,7 @@ impl GovernanceContract {
             execution_grace_period: config.execution_grace_period,
             status: ProposalStatus::Active,
             metadata_uri: metadata_uri.clone(),
-            kind: ProposalKind::Executable,
+            kind,
         };
         env.storage().persistent().set(&DataKey::Proposal(id), &proposal);
         env.storage().instance().set(&DataKey::ProposalCount, &id);
@@ -1535,6 +1561,11 @@ impl GovernanceContract {
 
         Self::touch_proposal(env, id);
         Self::touch_instance(env);
+
+        Self::update_stats(env, |stats| {
+            stats.total_proposals = stats.total_proposals.saturating_add(1);
+            stats.active = stats.active.saturating_add(1);
+        });
 
         env.events().publish(
             (Symbol::new(env, "proposal_created"), id),
@@ -1795,8 +1826,8 @@ impl GovernanceContract {
         });
     }
 
-    /// The counter that tracks proposals in `status`. `Vetoed` has none, and
-    /// `Passed` is a phase that `get_proposal_phase` derives rather than a status.
+    /// The counter that tracks proposals in `status`. `Passed` is a phase that
+    /// `get_proposal_phase` derives rather than a status.
     fn status_counter<'a>(stats: &'a mut GovernanceStats, status: &ProposalStatus) -> Option<&'a mut u64> {
         match status {
             ProposalStatus::Active => Some(&mut stats.active),
@@ -1805,7 +1836,7 @@ impl GovernanceContract {
             ProposalStatus::Failed => Some(&mut stats.failed),
             ProposalStatus::Cancelled => Some(&mut stats.cancelled),
             ProposalStatus::Expired => Some(&mut stats.expired),
-            ProposalStatus::Vetoed => None,
+            ProposalStatus::Vetoed => Some(&mut stats.vetoed),
         }
     }
 }
