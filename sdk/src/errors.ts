@@ -40,6 +40,8 @@ export enum GovernanceError {
   ProposalNotCancellable = 32,
   ProposerOnCooldown = 33,
   VotingNotStarted = 34,
+  TooManyActions = 35,
+  ActionFailed = 36,
 }
 
 /** Mirror of `TokenError` in contracts/token/src/lib.rs. Same rules as above. */
@@ -53,6 +55,10 @@ export enum TokenError {
   InvalidExpiration = 7,
   InvalidSupply = 8,
   InvalidDecimals = 9,
+  NotStaked = 10,
+  AlreadyStaked = 11,
+  LockNotExpired = 12,
+  InvalidDuration = 13,
 }
 
 export class RpcTimeoutError extends Error {

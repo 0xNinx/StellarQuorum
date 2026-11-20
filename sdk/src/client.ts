@@ -1,5 +1,5 @@
 import { rpc, Contract, Transaction, TransactionBuilder, BASE_FEE, nativeToScVal, scValToNative, Address, Account, xdr } from '@stellar/stellar-sdk';
-import type { Proposal, GovernanceConfig, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions } from './types.js';
+import type { Proposal, GovernanceConfig, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions, GovernanceStats } from './types.js';
 import { ReadCache } from './cache.js';
 import { SimulationBatcher, postSimulationBatch } from './batch.js';
 import { GovernanceError, parseGovernanceError, RpcTimeoutError, TransactionFailedError, contractErrorCode } from './errors.js';
@@ -839,81 +839,112 @@ export class QuorumClient {
     );
   }
 
-  // ── Admin transfer (issue #437) ──────────────────────────────────────────
+  // ── Staking (issue #454) ─────────────────────────────────────────────────
 
   /**
-   * Propose a new admin for the token contract.
-   * The proposed admin must call `acceptAdmin` to complete the transfer.
-   * Emits an `admin_transfer_proposed` event.
+   * Lock `amount` tokens for `durationLedgers` ledgers to earn a vote-power boost.
+   * The staked amount is included in `lockedBalance` until the lock expires.
    */
-  async buildTransferAdmin(currentAdmin: string, newAdmin: string, source?: string): Promise<string> {
+  async buildStake(staker: string, amount: bigint, durationLedgers: number, source?: string): Promise<string> {
     return this.buildTokenTransaction(
-      source ?? currentAdmin,
-      'transfer_admin',
-      nativeToScVal(newAdmin, { type: 'address' }),
+      source ?? staker,
+      'stake',
+      new Address(staker).toScVal(),
+      nativeToScVal(amount, { type: 'i128' }),
+      nativeToScVal(durationLedgers, { type: 'u32' }),
     );
   }
 
   /**
-   * Cancel a pending admin transfer proposal.
-   * Only the current admin can call this.
-   * Emits an `admin_transfer_cancelled` event.
+   * Release a fully-expired stake back to the holder's spendable balance.
+   * Panics with `LockNotExpired` if the lock period has not passed.
    */
-  async buildCancelAdminTransfer(currentAdmin: string, source?: string): Promise<string> {
+  async buildUnstake(staker: string, source?: string): Promise<string> {
     return this.buildTokenTransaction(
-      source ?? currentAdmin,
-      'cancel_admin_transfer',
+      source ?? staker,
+      'unstake',
+      new Address(staker).toScVal(),
     );
   }
-
-  // ── Proposal actions (issue #452) ────────────────────────────────────────
 
   /**
-   * Attach an on-chain action to a proposal.
-   * Actions are executed when the proposal is executed.
-   *
-   * Common arg encoding:
-   *   - string  → `nativeToScVal(value, { type: 'string' })`
-   *   - bigint  → `nativeToScVal(value, { type: 'i128' })`
-   *   - address → `nativeToScVal(value, { type: 'address' })`
+   * Amount currently locked in an active stake (zero if no active stake).
+   * Included in the holder's total balance but not in `spendableBalance`.
    */
-  async buildSetProposalAction(
-    proposer: string,
-    proposalId: bigint,
-    action: ProposalAction,
-    source?: string,
-  ): Promise<string> {
-    return this.buildGovernanceTransaction(
-      source ?? proposer,
-      'set_proposal_action',
-      nativeToScVal(proposalId, { type: 'u64' }),
-      nativeToScVal(action.targetContractId, { type: 'address' }),
-      nativeToScVal(action.functionName, { type: 'symbol' }),
-      nativeToScVal(action.args),
-    );
-  }
-
-  /** Fetch the on-chain actions attached to a proposal. */
-  async getProposalActions(proposalId: bigint, options?: ReadOptions): Promise<ProposalAction[]> {
-    const raw = await this.simulate<unknown[]>('get_proposal_actions', nativeToScVal(proposalId, { type: 'u64' }));
-    if (!Array.isArray(raw)) return [];
-    return raw.map((item: unknown) => {
-      const r = item as { target_contract_id: string; function_name: string; args: unknown[] };
-      return {
-        targetContractId: r.target_contract_id,
-        functionName: r.function_name,
-        args: r.args ?? [],
-      };
+  async lockedBalance(holder: string, options?: ReadOptions): Promise<bigint> {
+    return this.cache.read('lockedBalance', [holder], options, async () => {
+      const raw = await this.simulateToken<bigint | number>('locked_balance', new Address(holder).toScVal());
+      return BigInt(raw);
     });
   }
 
   /**
-   * Check whether a target contract is in the governance allowlist.
-   * Proposals targeting disallowed contracts are rejected at submission.
+   * Liquid (non-locked) balance: `balance - lockedBalance`.
+   * This is the amount the holder can transfer or approve immediately.
    */
-  async isTargetAllowed(targetContractId: string, options?: ReadOptions): Promise<boolean> {
-    const raw = await this.simulate<boolean>('is_target_allowed', nativeToScVal(targetContractId, { type: 'address' }));
+  async spendableBalance(holder: string, options?: ReadOptions): Promise<bigint> {
+    return this.cache.read('spendableBalance', [holder], options, async () => {
+      const raw = await this.simulateToken<bigint | number>('spendable_balance', new Address(holder).toScVal());
+      return BigInt(raw);
+    });
+  }
+
+  /**
+   * Preview the vote-power multiplier for a given `amount` and `durationLedgers`.
+   * Returns the boosted voting power (not the multiplier ratio) as the contract
+   * would compute it via `lock_boost(amount, duration)`.
+   */
+  async previewStakeBoost(amount: bigint, durationLedgers: number, options?: ReadOptions): Promise<bigint> {
+    const raw = await this.simulateToken<bigint | number>(
+      'lock_boost',
+      nativeToScVal(amount, { type: 'i128' }),
+      nativeToScVal(durationLedgers, { type: 'u32' }),
+    );
+    return BigInt(raw);
+  }
+
+  // ── Governance computed views (issue #455) ───────────────────────────────
+
+  /**
+   * Derived display phase for a proposal, computed server-side so the client
+   * does not need to compare ledger sequences.
+   * Returns one of: `'Pending' | 'Voting' | 'TimelockPending' | ProposalStatus`.
+   */
+  async getProposalPhase(proposalId: bigint, options?: ReadOptions): Promise<string> {
+    return this.simulate<string>('get_proposal_phase', nativeToScVal(proposalId, { type: 'u64' }));
+  }
+
+  /**
+   * Fraction of the quorum requirement satisfied so far.
+   * Returns a value in `[0, 10_000]` where 10_000 means quorum is exactly met.
+   */
+  async getQuorumProgress(proposalId: bigint, options?: ReadOptions): Promise<number> {
+    const raw = await this.simulate<number | bigint>('get_quorum_progress', nativeToScVal(proposalId, { type: 'u64' }));
+    return Number(raw);
+  }
+
+  /** Whether the current for-votes satisfy the quorum requirement. */
+  async hasReachedQuorum(proposalId: bigint, options?: ReadOptions): Promise<boolean> {
+    const raw = await this.simulate<boolean>('has_reached_quorum', nativeToScVal(proposalId, { type: 'u64' }));
     return raw === true;
+  }
+
+  /**
+   * Aggregate governance stats: proposal counts by terminal status, total supply,
+   * and participation rate.
+   */
+  async getGovernanceStats(options?: ReadOptions): Promise<GovernanceStats> {
+    const raw = await this.simulate<RawGovernanceStats>('get_governance_stats');
+    return {
+      totalProposals: Number(raw.total_proposals),
+      activeProposals: Number(raw.active_proposals),
+      queuedProposals: Number(raw.queued_proposals),
+      executedProposals: Number(raw.executed_proposals),
+      failedProposals: Number(raw.failed_proposals),
+      cancelledProposals: Number(raw.cancelled_proposals ?? 0),
+      expiredProposals: Number(raw.expired_proposals ?? 0),
+      vetoedProposals: Number(raw.vetoed_proposals ?? 0),
+    };
   }
 }
 
@@ -984,6 +1015,17 @@ interface RawConfig {
   paused?: boolean;
   proposal_deposit?: bigint;
   proposer_cooldown?: number;
+}
+
+interface RawGovernanceStats {
+  total_proposals: number | bigint;
+  active_proposals: number | bigint;
+  queued_proposals: number | bigint;
+  executed_proposals: number | bigint;
+  failed_proposals: number | bigint;
+  cancelled_proposals?: number | bigint;
+  expired_proposals?: number | bigint;
+  vetoed_proposals?: number | bigint;
 }
 
 function decodeProposal(raw: RawProposal): Proposal {
