@@ -157,6 +157,7 @@ pub enum DataKey {
     Delegate(Address),
     VoteCheckpoints(Address),
     Locks(Address),
+    TotalStakeBoost,  // i128: sum of all active stake amounts, updated on stake/unstake
 }
 
 /// Ledgers in roughly one day, at Stellar's ~5 second close time.
@@ -273,6 +274,23 @@ impl QuorumToken {
     pub fn total_supply(env: Env) -> i128 {
         Self::touch_instance(&env);
         env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0)
+    }
+
+    /// Total supply plus the aggregate stake boost outstanding right now.
+    ///
+    /// `get_past_votes` adds up to `staked_amount` of boost per staker, so the
+    /// sum of all voting weights can exceed `total_supply()`. Governance computes
+    /// `quorum_required` from `total_supply()` alone, which means quorum is
+    /// effectively easier to reach than `quorum_bps` implies when staking is
+    /// heavy (issue #435). Use this view as the denominator when you need
+    /// quorum to reflect actual outstanding voting power. The value is a
+    /// real-time snapshot; use `total_supply()` for backward-looking quorum
+    /// checks against a closed snapshot ledger.
+    pub fn total_voting_supply(env: Env) -> i128 {
+        Self::touch_instance(&env);
+        let supply: i128 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+        let boost: i128 = env.storage().instance().get(&DataKey::TotalStakeBoost).unwrap_or(0);
+        supply.saturating_add(boost)
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
@@ -559,9 +577,66 @@ impl QuorumToken {
         let unlock_ledger = ledger.checked_add(duration).ok_or(TokenError::Overflow)?;
         Self::record_lock(&env, &owner, Lock { ledger, amount, unlock_ledger });
 
+        // Track the aggregate stake so total_voting_supply() can report it.
+        let prev_boost: i128 = env.storage().instance().get(&DataKey::TotalStakeBoost).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalStakeBoost, &prev_boost.saturating_add(amount));
+
         env.events().publish(
             (Symbol::new(&env, "stake"), owner.clone()),
             Staked { owner, amount, unlock_ledger },
+        );
+        Ok(())
+    }
+
+    /// Add `amount` to an existing active lock without resetting the unlock
+    /// ledger. The combined (old + new) amount must not exceed the owner's
+    /// spendable balance. Fails if no lock is currently active.
+    pub fn increase_stake(env: Env, owner: Address, amount: i128) -> Result<(), TokenError> {
+        owner.require_auth();
+        if amount <= 0 { return Err(TokenError::InvalidAmount); }
+        let mut lock = Self::current_lock(&Self::locks(&env, &owner))
+            .ok_or(TokenError::NotStaked)?;
+        let new_amount = lock.amount.checked_add(amount).ok_or(TokenError::Overflow)?;
+        if new_amount > Self::balance(env.clone(), owner.clone()) {
+            return Err(TokenError::InsufficientBalance);
+        }
+        let ledger = env.ledger().sequence();
+        lock.amount = new_amount;
+        lock.ledger = ledger;
+        Self::record_lock(&env, &owner, lock.clone());
+
+        let prev_boost: i128 = env.storage().instance().get(&DataKey::TotalStakeBoost).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalStakeBoost, &prev_boost.saturating_add(amount));
+
+        env.events().publish(
+            (Symbol::new(&env, "stake_increased"), owner.clone()),
+            Staked { owner, amount: new_amount, unlock_ledger: lock.unlock_ledger },
+        );
+        Ok(())
+    }
+
+    /// Extend an existing active lock to `new_unlock_ledger`. The new unlock
+    /// ledger must be strictly later than the current one and must not exceed
+    /// `current_ledger + MAX_LOCK_LEDGERS`. Fails if no lock is active.
+    pub fn extend_stake(env: Env, owner: Address, new_unlock_ledger: u32) -> Result<(), TokenError> {
+        owner.require_auth();
+        let mut lock = Self::current_lock(&Self::locks(&env, &owner))
+            .ok_or(TokenError::NotStaked)?;
+        let ledger = env.ledger().sequence();
+        let max_unlock = ledger.checked_add(MAX_LOCK_LEDGERS).ok_or(TokenError::Overflow)?;
+        if new_unlock_ledger <= lock.unlock_ledger {
+            return Err(TokenError::InvalidDuration);
+        }
+        if new_unlock_ledger > max_unlock {
+            return Err(TokenError::InvalidDuration);
+        }
+        lock.unlock_ledger = new_unlock_ledger;
+        lock.ledger = ledger;
+        Self::record_lock(&env, &owner, lock.clone());
+
+        env.events().publish(
+            (Symbol::new(&env, "stake_extended"), owner.clone()),
+            Staked { owner, amount: lock.amount, unlock_ledger: new_unlock_ledger },
         );
         Ok(())
     }
@@ -581,6 +656,10 @@ impl QuorumToken {
             &owner,
             Lock { ledger, amount: 0, unlock_ledger: lock.unlock_ledger },
         );
+
+        // Decrement the aggregate stake accumulator.
+        let prev_boost: i128 = env.storage().instance().get(&DataKey::TotalStakeBoost).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalStakeBoost, &prev_boost.saturating_sub(amount));
 
         env.events().publish(
             (Symbol::new(&env, "unstake"), owner.clone()),
