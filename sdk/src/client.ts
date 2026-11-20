@@ -1,8 +1,10 @@
 import { rpc, Contract, Transaction, TransactionBuilder, BASE_FEE, nativeToScVal, scValToNative, Address, Account, xdr } from '@stellar/stellar-sdk';
-import type { Proposal, GovernanceConfig, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions, GovernanceStats } from './types.js';
+import type { Proposal, GovernanceConfig, ContractVersions, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions, GovernanceStats } from './types.js';
 import { ReadCache } from './cache.js';
 import { SimulationBatcher, postSimulationBatch } from './batch.js';
-import { GovernanceError, parseGovernanceError, RpcTimeoutError, TransactionFailedError, contractErrorCode } from './errors.js';
+import { GovernanceContractError, GOVERNANCE_ERROR_MESSAGES, GovernanceError, governanceErrorFromCode, parseGovernanceError, RpcTimeoutError, TransactionFailedError, contractErrorCode } from './errors.js';
+import { decodeEvent } from './events.js';
+import type { ProposalVetoedEvent } from './events.js';
 
 /**
  * Source account used for read-only simulation.
@@ -50,6 +52,16 @@ export const DEFAULT_RETRY_JITTER_MS = 50;
 export const DEFAULT_POLL_INTERVAL_MS = 1_000;
 export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 60_000;
 
+/** SDK 0.2.x is built against the 0.1.x governance and token ABIs. */
+export const SUPPORTED_CONTRACT_VERSION_RANGE = '>=0.1.0 <0.2.0';
+
+function isSupportedContractVersion(version: string): boolean {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/u.exec(version);
+  if (!match) return false;
+  const [, major, minor] = match;
+  return Number(major) === 0 && Number(minor) === 1;
+}
+
 // ─── Typed governance errors (issue #115) ────────────────────────────────────
 // The contract surfaces failures as `GovernanceError` codes; a simulation
 // failure string looks like `... Error(Contract, #12) ...`. These map the
@@ -57,13 +69,17 @@ export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 60_000;
 // instead of parsing strings.
 
 export class ProposalNotFoundError extends Error {
-  constructor(proposalId?: bigint | string) {
-    super(`Proposal not found${proposalId !== undefined ? `: ${String(proposalId)}` : ''}`);
+  readonly code = GovernanceError.ProposalNotFound;
+
+  constructor(proposalId?: bigint | string, message?: string) {
+    super(message ?? `Proposal not found${proposalId !== undefined ? `: ${String(proposalId)}` : ''}`);
     this.name = 'ProposalNotFoundError';
   }
 }
 
 export class VotingNotActiveError extends Error {
+  readonly code = GovernanceError.VotingNotActive;
+
   constructor(message = 'Voting window is still open; proposal cannot be finalized yet') {
     super(message);
     this.name = 'VotingNotActiveError';
@@ -71,6 +87,8 @@ export class VotingNotActiveError extends Error {
 }
 
 export class ProposalNotPassedError extends Error {
+  readonly code = GovernanceError.ProposalNotPassed;
+
   constructor(message = 'Proposal is not queued and cannot be executed') {
     super(message);
     this.name = 'ProposalNotPassedError';
@@ -78,6 +96,8 @@ export class ProposalNotPassedError extends Error {
 }
 
 export class TimelockNotExpiredError extends Error {
+  readonly code = GovernanceError.TimelockNotExpired;
+
   constructor(message = 'Timelock has not expired; proposal cannot be executed yet') {
     super(message);
     this.name = 'TimelockNotExpiredError';
@@ -85,6 +105,8 @@ export class TimelockNotExpiredError extends Error {
 }
 
 export class UnauthorizedError extends Error {
+  readonly code = GovernanceError.Unauthorized;
+
   constructor(message = 'Caller is not authorized for this action') {
     super(message);
     this.name = 'UnauthorizedError';
@@ -109,24 +131,24 @@ export class ProposalStatusTimeoutError extends Error {
   }
 }
 
-function mapGovernanceSimulationError(method: string, raw: unknown): Error {
+export function mapGovernanceSimulationError(method: string, raw: unknown): Error {
   const message = raw instanceof Error ? raw.message : String(raw);
-  if (/#\s*3\b/.test(message) || /ProposalNotFound/.test(message)) {
-    return new ProposalNotFoundError();
+  const code = contractErrorCode(message);
+  const namedCode = Object.entries(GovernanceError).find(([name, value]) =>
+    typeof value === 'number' && message.includes(name),
+  )?.[1];
+  const governanceCode = code === undefined ? namedCode as GovernanceError | undefined : governanceErrorFromCode(code);
+  if (governanceCode === undefined) return new Error(`Simulation of ${method} failed: ${message}`);
+
+  const detail = `Simulation of ${method} failed: ${GOVERNANCE_ERROR_MESSAGES[governanceCode]} (${message})`;
+  switch (governanceCode) {
+    case GovernanceError.ProposalNotFound: return new ProposalNotFoundError(undefined, detail);
+    case GovernanceError.VotingNotActive: return new VotingNotActiveError(detail);
+    case GovernanceError.ProposalNotPassed: return new ProposalNotPassedError(detail);
+    case GovernanceError.TimelockNotExpired: return new TimelockNotExpiredError(detail);
+    case GovernanceError.Unauthorized: return new UnauthorizedError(detail);
+    default: return new GovernanceContractError(governanceCode, detail);
   }
-  if (/#\s*4\b/.test(message) || /VotingNotActive/.test(message)) {
-    return new VotingNotActiveError(`Simulation of ${method} failed: voting is not active (${message})`);
-  }
-  if (/#\s*7\b/.test(message) || /ProposalNotPassed/.test(message)) {
-    return new ProposalNotPassedError(`Simulation of ${method} failed: proposal has not passed (${message})`);
-  }
-  if (/#\s*12\b/.test(message) || /TimelockNotExpired/.test(message)) {
-    return new TimelockNotExpiredError(`Simulation of ${method} failed: timelock not expired (${message})`);
-  }
-  if (/#\s*2\b/.test(message) || /Unauthorized/.test(message)) {
-    return new UnauthorizedError(`Simulation of ${method} failed: unauthorized (${message})`);
-  }
-  return new Error(`Simulation of ${method} failed: ${message}`);
 }
 
 export class QuorumClient {
@@ -177,6 +199,39 @@ export class QuorumClient {
         throw error;
       }
     });
+  }
+
+  /**
+   * Returns the on-chain veto event for a vetoed proposal, including its
+   * guardian and required reason. The event is searched only over that
+   * proposal's timelock window, using Soroban RPC's event filters.
+   */
+  async getProposalVetoEvent(id: bigint): Promise<ProposalVetoedEvent | null> {
+    const proposal = await this.getProposal(id);
+    if (!proposal || proposal.status !== 'Vetoed' || proposal.queueLedger === 0) return null;
+
+    const startLedger = Math.max(1, proposal.queueLedger - proposal.timelockPeriod);
+    const endLedger = proposal.queueLedger - 1;
+    if (startLedger > endLedger) return null;
+
+    const topic = nativeToScVal('proposal_vetoed', { type: 'symbol' }).toXDR('base64');
+    const proposalTopic = nativeToScVal(id, { type: 'u64' }).toXDR('base64');
+    const response = await this.read('getProposalVetoEvent', () => this.server.getEvents({
+      startLedger,
+      endLedger,
+      limit: 100,
+      filters: [{
+        type: 'contract',
+        contractIds: [this.config.governanceContractId],
+        topics: [[topic, proposalTopic]],
+      }],
+    }));
+
+    for (const event of response.events) {
+      const decoded = decodeEvent(event);
+      if (decoded?.type === 'proposal_vetoed' && decoded.id === id) return decoded;
+    }
+    return null;
   }
 
   async getProposalCount(options?: ReadOptions): Promise<bigint> {
@@ -232,6 +287,29 @@ export class QuorumClient {
         proposerCooldown: raw.proposer_cooldown ?? 0,
       };
     });
+  }
+
+  /**
+   * Reads both deployed contract versions and warns when either falls outside
+   * the ABI range supported by this SDK release. Call during application
+   * startup so a contract/SDK mismatch is visible before users submit a call.
+   */
+  async getContractVersions(): Promise<ContractVersions> {
+    const [governance, config] = await Promise.all([
+      this.simulate<string>('version'),
+      this.getConfig({ bypassCache: true }),
+    ]);
+    const token = await this.simulateOn<string>(new Contract(config.token), 'version');
+    const versions = { governance, token };
+    for (const [contract, version] of Object.entries(versions)) {
+      if (!isSupportedContractVersion(version)) {
+        console.warn(
+          `Quorum SDK supports contract versions ${SUPPORTED_CONTRACT_VERSION_RANGE}; ` +
+          `${contract} contract reports ${version}. Upgrade the SDK or deploy a supported contract version.`,
+        );
+      }
+    }
+    return versions;
   }
 
   async hasVoted(proposalId: bigint, voter: string, options?: ReadOptions): Promise<boolean> {
@@ -775,6 +853,30 @@ export class QuorumClient {
     );
   }
 
+  /**
+   * Builds signable XDR for `mark_expired(proposal_id)` (issue #456).
+   * Anyone may mark an expired proposal, so `source` is the explicit fee payer.
+   */
+  async buildMarkExpired(source: string, proposalId: bigint): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source,
+      'mark_expired',
+      nativeToScVal(proposalId, { type: 'u64' }),
+    );
+  }
+
+  /**
+   * Builds signable XDR for `extend_proposal_ttl(proposal_id)` (issue #456).
+   * Anyone may extend the entry lifetime, so `source` pays the transaction fee.
+   */
+  async buildExtendProposalTtl(source: string, proposalId: bigint): Promise<string> {
+    return this.buildGovernanceTransaction(
+      source,
+      'extend_proposal_ttl',
+      nativeToScVal(proposalId, { type: 'u64' }),
+    );
+  }
+
   // ─── Token builders (issue #117) ─────────────────────────────────────────
 
   /**
@@ -1044,7 +1146,7 @@ function decodeProposal(raw: RawProposal): Proposal {
     quorumRequired: raw.quorum_required,
     status: decodeStatus(raw.status),
     timelockPeriod: raw.timelock_period ?? 0,
-    metadataUri: raw.metadata_uri,
+    ...(raw.metadata_uri === undefined ? {} : { metadataUri: raw.metadata_uri }),
     kind: raw.kind ? (raw.kind[0] as 'Standard' | 'Upgrade') : 'Standard',
   };
 }

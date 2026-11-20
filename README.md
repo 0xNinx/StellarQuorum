@@ -191,6 +191,8 @@ await client.getProposal(1n);           // Get proposal by ID
 await client.getAllProposals();          // Get all proposals
 await client.getProposalCount();        // Total proposal count
 await client.getConfig();               // Protocol config (quorum, voting period, etc.)
+await client.getContractVersions();     // Warn if either deployed contract is outside the SDK's supported ABI range
+await client.getProposalVetoEvent(1n);   // Guardian and reason for a vetoed proposal, or null
 await client.hasVoted(1n, 'G...');      // Check if address voted
 await client.getVote(1n, 'G...');       // How they voted: 0=Against, 1=For, 2=Abstain, null=not voted
 
@@ -199,8 +201,10 @@ await client.getLatestLedger();
 // Build transactions (returns unsigned XDR for Freighter signing)
 await client.buildCreateProposal(address, title, description);
 await client.buildVote(voter, proposalId, support); // support: 0=Against, 1=For, 2=Abstain
-await client.buildFinalize(proposalId);
-await client.buildExecute(proposalId);
+await client.buildFinalize(address, proposalId);
+await client.buildExecute(address, proposalId);
+await client.buildMarkExpired(address, proposalId);       // Explicit fee-paying source
+await client.buildExtendProposalTtl(address, proposalId); // Explicit fee-paying source
 ```
 
 ### Signing with Freighter
@@ -251,12 +255,15 @@ for (const raw of decodeEvents(events.events)) {
 
 Known topics: `proposal_created`, `vote_cast`, `proposal_finalized`,
 `proposal_queued`, `proposal_executed`, `proposal_cancelled`, `transfer`,
-`mint`, `burn`, `approve`, `admin_transferred`. Unknown topics decode to
+`proposal_vetoed`, `mint`, `burn`, `approve`, `admin_transferred`. Unknown topics decode to
 `null` and are skipped rather than throwing.
 
 ### Contract errors
 
-Contract failures surface as `Error(Contract, #N)`. `GovernanceError` and `TokenError` mirror the Rust `#[contracterror]` enums with the same codes:
+Contract failures are mapped to typed SDK errors for every `GovernanceError`
+code; each exposes a numeric `code`, and the SDK includes a readable message.
+`GovernanceError` and `TokenError` mirror the Rust `#[contracterror]` enums
+with the same codes:
 
 ```typescript
 import { parseGovernanceError, GovernanceError } from '@quorum/sdk';

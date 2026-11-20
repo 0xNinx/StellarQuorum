@@ -22,6 +22,7 @@ test('decodes the exact proposal fixture consumed by Python, without precision l
     forVotes: BigInt(expected.for_votes), againstVotes: BigInt(expected.against_votes), abstainVotes: BigInt(expected.abstain_votes),
     snapshotLedger: expected.snapshot_ledger, startLedger: expected.start_ledger, endLedger: expected.end_ledger,
     queueLedger: expected.queue_ledger, quorumRequired: BigInt(expected.quorum_required), status: expected.status,
+    timelockPeriod: 0, kind: 'Standard',
   });
 });
 
@@ -31,6 +32,7 @@ test('decodes the exact config fixture consumed by Python', async () => {
   expect(await client.getConfig()).toEqual({
     token: expected.token, quorumBps: expected.quorum_bps, votingPeriod: expected.voting_period,
     timelockPeriod: expected.timelock_period, proposalThreshold: BigInt(expected.proposal_threshold), admin: expected.admin,
+    guardian: '', executionGracePeriod: 0, paused: false, proposalDeposit: 0n, proposerCooldown: 0,
   });
 });
 

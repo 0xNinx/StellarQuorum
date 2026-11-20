@@ -61,6 +61,7 @@ const proposalFields = {
   start_ledger: nativeToScVal(1000, { type: 'u32' }),
   end_ledger: nativeToScVal(2000, { type: 'u32' }),
   queue_ledger: nativeToScVal(0, { type: 'u32' }),
+  timelock_period: nativeToScVal(10, { type: 'u32' }),
   quorum_required: nativeToScVal(50n, { type: 'i128' }),
   status: enumVariant('Active'),
 };
@@ -147,6 +148,8 @@ describe('result decoding', () => {
       queueLedger: 0,
       quorumRequired: 50n,
       status: 'Active',
+      timelockPeriod: 10,
+      kind: 'Standard',
     });
   });
 
@@ -159,8 +162,8 @@ describe('result decoding', () => {
   });
 
   it('rejects a ProposalStatus variant the SDK does not know', async () => {
-    returns(structVal({ ...proposalFields, status: enumVariant('Vetoed') }));
-    await expect(client.getProposal(7n)).rejects.toThrow('Unknown ProposalStatus variant: Vetoed');
+    returns(structVal({ ...proposalFields, status: enumVariant('Ghost') }));
+    await expect(client.getProposal(7n)).rejects.toThrow('Unknown ProposalStatus variant: Ghost');
   });
 
   it('decodes get_proposal_count as bigint', async () => {
@@ -184,6 +187,11 @@ describe('result decoding', () => {
       timelockPeriod: 34560,
       proposalThreshold: 1000n,
       admin: VOTER,
+      guardian: '',
+      executionGracePeriod: 0,
+      paused: false,
+      proposalDeposit: 0n,
+      proposerCooldown: 0,
     });
   });
 
@@ -330,10 +338,57 @@ describe('transaction builders', () => {
       prepare.mockRestore();
     }
   });
+
+  it.each([
+    ['buildMarkExpired', 'mark_expired'],
+    ['buildExtendProposalTtl', 'extend_proposal_ttl'],
+  ] as const)('%s sends the explicit fee source and proposal id', async (builderName, method) => {
+    const getAccount = jest.spyOn(rpc.Server.prototype, 'getAccount').mockResolvedValue(new Account(FEE_PAYER, '0'));
+    const prepare = jest.spyOn(rpc.Server.prototype, 'prepareTransaction').mockImplementation(async tx => tx as never);
+    try {
+      await client[builderName](FEE_PAYER, 42n);
+      const tx = prepare.mock.calls[0][0] as Transaction;
+      const func = (tx.operations[0] as { func: xdr.HostFunction }).func;
+      if (func.type !== 'hostFunctionTypeInvokeContract') throw new Error('Expected contract invocation');
+      const invocation = invoke(func.invokeContract);
+
+      expect(tx.source).toBe(FEE_PAYER);
+      expect(invocation.method).toBe(method);
+      expect(invocation.args).toHaveLength(1);
+      expect(scValToNative(invocation.args[0])).toBe(42n);
+    } finally {
+      getAccount.mockRestore();
+      prepare.mockRestore();
+    }
+  });
+});
+
+describe('contract versions', () => {
+  it('reads both deployed versions and warns when either is outside the supported range', async () => {
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    returns(nativeToScVal('0.2.0', { type: 'string' }));
+    returns(structVal({
+      token: new Address(TOKEN).toScVal(),
+      quorum_bps: nativeToScVal(500, { type: 'u32' }),
+      voting_period: nativeToScVal(100, { type: 'u32' }),
+      timelock_period: nativeToScVal(10, { type: 'u32' }),
+      proposal_threshold: nativeToScVal(1n, { type: 'i128' }),
+      admin: new Address(VOTER).toScVal(),
+    }));
+    returns(nativeToScVal('0.1.0', { type: 'string' }));
+
+    try {
+      await expect(client.getContractVersions()).resolves.toEqual({ governance: '0.2.0', token: '0.1.0' });
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('governance contract reports 0.2.0'));
+      expect(warning).toHaveBeenCalledTimes(1);
+    } finally {
+      warning.mockRestore();
+    }
+  });
 });
 
 describe('governance and token history views', () => {
-  const otherProposal = structVal({ ...proposalFields, id: nativeToScVal(8n, { type: 'u64' }), status: enumVariant('Passed') });
+  const otherProposal = structVal({ ...proposalFields, id: nativeToScVal(8n, { type: 'u64' }), status: enumVariant('Queued') });
 
   it('get_proposals_by_proposer(proposer: Address) decodes every proposal in order', async () => {
     returns(xdr.ScVal.scvVec([proposalVal, otherProposal]));
@@ -344,12 +399,12 @@ describe('governance and token history views', () => {
     expect(method).toBe('get_proposals_by_proposer');
     expect(args.map(a => a.type)).toEqual(['scvAddress']);
     expect(Address.fromScVal(args[0]).toString()).toBe(VOTER);
-    expect(proposals.map(p => [p.id, p.status])).toEqual([[7n, 'Active'], [8n, 'Passed']]);
+    expect(proposals.map(p => [p.id, p.status])).toEqual([[7n, 'Active'], [8n, 'Queued']]);
     expect(proposals[0]).toEqual({
       id: 7n, proposer: VOTER, title: 'Raise quorum', description: 'Details',
       forVotes: 100n, againstVotes: 20n, abstainVotes: 5n,
       snapshotLedger: 999, startLedger: 1000, endLedger: 2000, queueLedger: 0,
-      quorumRequired: 50n, status: 'Active',
+      quorumRequired: 50n, status: 'Active', timelockPeriod: 10, kind: 'Standard',
     });
   });
 
@@ -401,5 +456,52 @@ describe('governance and token history views', () => {
     expect(await scoped.getPastTotalSupply(1000)).toBe(6000n);
     expect(simulate).toHaveBeenCalledTimes(2);
     expect(scValToNative(lastCall().args[0])).toBe(1000);
+  });
+});
+
+describe('proposal veto history', () => {
+  it('finds the veto event in the proposal timelock window and returns its guardian and reason', async () => {
+    const guardian = VOTER;
+    returns(structVal({
+      ...proposalFields,
+      status: enumVariant('Vetoed'),
+      queue_ledger: nativeToScVal(1010, { type: 'u32' }),
+    }));
+    const getEvents = jest.spyOn(rpc.Server.prototype, 'getEvents').mockResolvedValue({
+      events: [{
+        topic: [
+          nativeToScVal('proposal_vetoed', { type: 'symbol' }),
+          nativeToScVal(7n, { type: 'u64' }),
+        ],
+        value: structVal({
+          id: nativeToScVal(7n, { type: 'u64' }),
+          guardian: new Address(guardian).toScVal(),
+          reason: nativeToScVal('Treasury review is incomplete', { type: 'string' }),
+        }),
+      }],
+    } as unknown as rpc.Api.GetEventsResponse);
+
+    try {
+      await expect(client.getProposalVetoEvent(7n)).resolves.toMatchObject({
+        type: 'proposal_vetoed',
+        id: 7n,
+        guardian,
+        reason: 'Treasury review is incomplete',
+      });
+      expect(getEvents).toHaveBeenCalledWith(expect.objectContaining({
+        startLedger: 1000,
+        endLedger: 1009,
+        filters: [expect.objectContaining({
+          type: 'contract',
+          contractIds: [CONTRACT],
+          topics: [[
+            nativeToScVal('proposal_vetoed', { type: 'symbol' }).toXDR('base64'),
+            nativeToScVal(7n, { type: 'u64' }).toXDR('base64'),
+          ]],
+        })],
+      }));
+    } finally {
+      getEvents.mockRestore();
+    }
   });
 });

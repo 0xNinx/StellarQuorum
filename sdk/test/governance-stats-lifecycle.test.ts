@@ -8,7 +8,7 @@
  *   active + queued + executed + failed + cancelled + expired + vetoed == total_proposals
  */
 
-import { StrKey, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
+import { StrKey, xdr } from '@stellar/stellar-sdk';
 import { QuorumClient } from '../src';
 import type { GovernanceStats, QuorumClientConfig } from '../src';
 import { MockRpcServer, simulationSuccess } from './mockRpc';
@@ -48,7 +48,6 @@ function encodeStats(raw: {
   // The contract returns a #[contracttype] struct; scValToNative decodes it
   // to a plain object with snake_case keys.  We reverse that by encoding a
   // Map<Symbol, u64> to represent the struct.
-  const { xdr } = require('@stellar/stellar-sdk');
   const entries = Object.entries(raw).map(([k, v]) => {
     return new xdr.ScMapEntry({
       key: xdr.ScVal.scvSymbol(k),
@@ -62,10 +61,7 @@ function encodeStats(raw: {
 function serveStats(stats: Parameters<typeof encodeStats>[0]): void {
   const retval = encodeStats(stats);
   rpc.responder = () =>
-    simulationSuccess({
-      xdr: 'AAAA', // placeholder auth
-      retval,
-    });
+    simulationSuccess(retval);
 }
 
 function invariantHolds(s: GovernanceStats): boolean {

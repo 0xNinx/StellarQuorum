@@ -2,6 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { GovernanceError, TokenError, parseGovernanceError, parseTokenError, contractErrorCode } from '../src/errors';
+import { mapGovernanceSimulationError } from '../src/client';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -40,4 +41,17 @@ describe('parsing raw contract errors', () => {
     expect(parseGovernanceError('Error(Contract, #99)')).toBeUndefined();
     expect(parseTokenError('Error(Contract, #99)')).toBeUndefined();
   });
+});
+
+describe('typed simulation errors', () => {
+  it.each(Object.values(GovernanceError).filter((value): value is GovernanceError => typeof value === 'number'))(
+    'maps governance error code %i to a readable typed error',
+    code => {
+      const error = mapGovernanceSimulationError('test_call', new Error(`HostError: Error(Contract, #${code})`));
+
+      expect((error as Error & { code?: number }).code).toBe(code);
+      expect(error.message).toMatch(/Proposal not found|Simulation of test_call failed:/);
+      expect(error.message.length).toBeGreaterThan(30);
+    },
+  );
 });

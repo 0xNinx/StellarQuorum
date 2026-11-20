@@ -48,7 +48,7 @@ describe('estimateFees (issue #277)', () => {
     // A build* output: fee = inclusion (100) + the resource fee captured at build time (300).
     simulate.mockResolvedValueOnce(simulated('250'));
 
-    const fee = await client.estimateFees(builtTransaction('400', 300n));
+    const fee = await client.estimateFees(builtTransaction('100', 300n));
 
     expect(fee).toEqual({ inclusionFee: 100n, resourceFee: 250n, totalFee: 350n });
   });
