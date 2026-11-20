@@ -42,6 +42,18 @@
       "returns": "Promise<Proposal | null>"
     },
     {
+      "name": "getProposalVetoEvent",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<ProposalVetoedEvent | null>"
+    },
+    {
       "name": "getProposalCount",
       "parameters": [
         {
@@ -144,6 +156,11 @@
       "returns": "Promise<GovernanceConfig>"
     },
     {
+      "name": "getContractVersions",
+      "parameters": [],
+      "returns": "Promise<ContractVersions>"
+    },
+    {
       "name": "hasVoted",
       "parameters": [
         {
@@ -210,24 +227,6 @@
       "returns": "Promise<Proposal[]>"
     },
     {
-      "name": "getProposalsByProposer",
-      "parameters": [
-        {
-          "name": "proposer",
-          "type": "string",
-          "optional": false,
-          "rest": false
-        },
-        {
-          "name": "options",
-          "type": "ReadOptions",
-          "optional": true,
-          "rest": false
-        }
-      ],
-      "returns": "Promise<Proposal[]>"
-    },
-    {
       "name": "getProposals",
       "parameters": [
         {
@@ -245,6 +244,24 @@
         {
           "name": "options",
           "type": "GetProposalsOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<Proposal[]>"
+    },
+    {
+      "name": "getProposalsByProposer",
+      "parameters": [
+        {
+          "name": "proposer",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
           "optional": true,
           "rest": false
         }
@@ -564,6 +581,42 @@
       "returns": "Promise<string>"
     },
     {
+      "name": "buildMarkExpired",
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildExtendProposalTtl",
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
       "name": "buildTransfer",
       "parameters": [
         {
@@ -664,6 +717,180 @@
         }
       ],
       "returns": "Promise<string>"
+    },
+    {
+      "name": "buildStake",
+      "parameters": [
+        {
+          "name": "staker",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "amount",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "durationLedgers",
+          "type": "number",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "buildUnstake",
+      "parameters": [
+        {
+          "name": "staker",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "lockedBalance",
+      "parameters": [
+        {
+          "name": "holder",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<bigint>"
+    },
+    {
+      "name": "spendableBalance",
+      "parameters": [
+        {
+          "name": "holder",
+          "type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<bigint>"
+    },
+    {
+      "name": "previewStakeBoost",
+      "parameters": [
+        {
+          "name": "amount",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "durationLedgers",
+          "type": "number",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<bigint>"
+    },
+    {
+      "name": "getProposalPhase",
+      "parameters": [
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>"
+    },
+    {
+      "name": "getQuorumProgress",
+      "parameters": [
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<number>"
+    },
+    {
+      "name": "hasReachedQuorum",
+      "parameters": [
+        {
+          "name": "proposalId",
+          "type": "bigint",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<boolean>"
+    },
+    {
+      "name": "getGovernanceStats",
+      "parameters": [
+        {
+          "name": "options",
+          "type": "ReadOptions",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<GovernanceStats>"
     }
   ],
   "errors": {
@@ -701,7 +928,9 @@
       "NotExecutable": 31,
       "ProposalNotCancellable": 32,
       "ProposerOnCooldown": 33,
-      "VotingNotStarted": 34
+      "VotingNotStarted": 34,
+      "TooManyActions": 35,
+      "ActionFailed": 36
     },
     "TokenError": {
       "AlreadyInitialized": 1,
@@ -712,7 +941,11 @@
       "Overflow": 6,
       "InvalidExpiration": 7,
       "InvalidSupply": 8,
-      "InvalidDecimals": 9
+      "InvalidDecimals": 9,
+      "NotStaked": 12,
+      "AlreadyStaked": 11,
+      "LockNotExpired": 13,
+      "InvalidDuration": 10
     }
   }
 }

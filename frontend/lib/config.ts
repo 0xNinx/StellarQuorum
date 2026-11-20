@@ -23,15 +23,28 @@ export const USE_FIXTURE = env.useFixture;
  */
 export const TOKEN_DECIMALS = 7;
 
+let versionCheck: Promise<void> | undefined;
+
 /** A QuorumClient pointed at the configured network. */
 export async function createQuorumClient(): Promise<QuorumClient> {
   // Imported lazily so fixture mode (and its tests) never load the Stellar SDK.
   const { QuorumClient, TESTNET } = await import("@quorum/sdk");
-  return new QuorumClient({
+  const client = new QuorumClient({
     rpcUrl: env.stellarRpcUrl || TESTNET.rpcUrl!,
     networkPassphrase: env.networkPassphrase || TESTNET.networkPassphrase!,
     // Validated in loadEnv, so this is a contract ID or nothing.
     governanceContractId: env.governanceContractId!,
     tokenContractId: env.tokenContractId ?? "",
   });
+  // Check once per server process on the first live SDK use. A failed version
+  // lookup must not prevent the page from serving; a version mismatch itself
+  // is reported by the SDK as a clear warning.
+  versionCheck ??= client.getContractVersions()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      console.warn("Unable to verify deployed Quorum contract versions", error);
+      versionCheck = undefined;
+    });
+  await versionCheck;
+  return client;
 }

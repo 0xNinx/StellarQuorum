@@ -33,6 +33,8 @@ export const EVENT_TOPICS = [
   'burn',
   'approve',
   'admin_transferred',
+  'admin_transfer_proposed',
+  'admin_transfer_cancelled',
   'delegated',
   'contract_initialized',
   'contract_paused',
@@ -45,6 +47,8 @@ export const EVENT_TOPICS = [
   'proposer_cooldown_updated',
   'upgraded',
   'stake',
+  'stake_increased',
+  'stake_extended',
   'unstake',
 ] as const;
 
@@ -165,6 +169,20 @@ export interface StakedEvent {
   unlockLedger: number;
 }
 
+export interface StakeIncreasedEvent {
+  type: 'stake_increased';
+  owner: string;
+  amount: bigint;
+  unlockLedger: number;
+}
+
+export interface StakeExtendedEvent {
+  type: 'stake_extended';
+  owner: string;
+  amount: bigint;
+  unlockLedger: number;
+}
+
 export interface UnstakedEvent {
   type: 'unstake';
   owner: string;
@@ -210,6 +228,17 @@ export interface AdminTransferredEvent {
   newAdmin: string;
 }
 
+export interface AdminTransferProposedEvent {
+  type: 'admin_transfer_proposed';
+  currentAdmin: string;
+  proposedAdmin: string;
+}
+
+export interface AdminTransferCancelledEvent {
+  type: 'admin_transfer_cancelled';
+  admin: string;
+}
+
 export interface DelegatedEvent {
   type: 'delegated';
   delegator: string;
@@ -249,6 +278,8 @@ export type QuorumEvent =
   | BurnEvent
   | ApproveEvent
   | AdminTransferredEvent
+  | AdminTransferProposedEvent
+  | AdminTransferCancelledEvent
   | DelegatedEvent
   | ContractInitializedEvent
   | ContractPauseEvent
@@ -260,6 +291,8 @@ export type QuorumEvent =
   | ProposerCooldownUpdatedEvent
   | UpgradedEvent
   | StakedEvent
+  | StakeIncreasedEvent
+  | StakeExtendedEvent
   | UnstakedEvent;
 
 /**
@@ -444,6 +477,14 @@ export function decodeEvent(event: RawContractEvent): QuorumEvent | null {
         previousAdmin: field<string>(raw, 'previous_admin', topic),
         newAdmin: field<string>(raw, 'new_admin', topic),
       };
+    case 'admin_transfer_proposed':
+      return {
+        type: 'admin_transfer_proposed',
+        currentAdmin: field<string>(raw, 'current_admin', topic),
+        proposedAdmin: field<string>(raw, 'proposed_admin', topic),
+      };
+    case 'admin_transfer_cancelled':
+      return { type: 'admin_transfer_cancelled', admin: field<string>(raw, 'admin', topic) };
     case 'proposal_vetoed':
       return {
         type: 'proposal_vetoed',
@@ -502,6 +543,14 @@ export function decodeEvent(event: RawContractEvent): QuorumEvent | null {
     case 'stake':
       return {
         type: 'stake',
+        owner: field<string>(raw, 'owner', topic),
+        amount: field<bigint>(raw, 'amount', topic),
+        unlockLedger: field<number>(raw, 'unlock_ledger', topic),
+      };
+    case 'stake_increased':
+    case 'stake_extended':
+      return {
+        type: topic,
         owner: field<string>(raw, 'owner', topic),
         amount: field<bigint>(raw, 'amount', topic),
         unlockLedger: field<number>(raw, 'unlock_ledger', topic),

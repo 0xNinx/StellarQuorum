@@ -134,6 +134,16 @@ const sample: Array<[string, xdr.ScVal, Record<string, unknown>]> = [
     { type: 'admin_transferred', previousAdmin: VOTER, newAdmin: VOTER },
   ],
   [
+    'admin_transfer_proposed',
+    structVal({ current_admin: addr(VOTER), proposed_admin: addr(VOTER) }),
+    { type: 'admin_transfer_proposed', currentAdmin: VOTER, proposedAdmin: VOTER },
+  ],
+  [
+    'admin_transfer_cancelled',
+    structVal({ admin: addr(VOTER) }),
+    { type: 'admin_transfer_cancelled', admin: VOTER },
+  ],
+  [
     'proposal_vetoed',
     structVal({ id: u64(7n), guardian: addr(VOTER), reason: str('Invalid proposal') }),
     { type: 'proposal_vetoed', id: 7n, guardian: VOTER, reason: 'Invalid proposal' },
@@ -182,6 +192,16 @@ const sample: Array<[string, xdr.ScVal, Record<string, unknown>]> = [
     'stake',
     structVal({ owner: addr(VOTER), amount: i128(1000n), unlock_ledger: u32(5000) }),
     { type: 'stake', owner: VOTER, amount: 1000n, unlockLedger: 5000 },
+  ],
+  [
+    'stake_increased',
+    structVal({ owner: addr(VOTER), amount: i128(1500n), unlock_ledger: u32(5000) }),
+    { type: 'stake_increased', owner: VOTER, amount: 1500n, unlockLedger: 5000 },
+  ],
+  [
+    'stake_extended',
+    structVal({ owner: addr(VOTER), amount: i128(1000n), unlock_ledger: u32(6000) }),
+    { type: 'stake_extended', owner: VOTER, amount: 1000n, unlockLedger: 6000 },
   ],
   [
     'unstake',

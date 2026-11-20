@@ -55,10 +55,68 @@ export enum TokenError {
   InvalidExpiration = 7,
   InvalidSupply = 8,
   InvalidDecimals = 9,
-  NotStaked = 10,
+  NotStaked = 12,
   AlreadyStaked = 11,
-  LockNotExpired = 12,
-  InvalidDuration = 13,
+  LockNotExpired = 13,
+  InvalidDuration = 10,
+}
+
+/** Human-readable descriptions for every on-chain governance error code. */
+export const GOVERNANCE_ERROR_MESSAGES: Readonly<Record<GovernanceError, string>> = {
+  [GovernanceError.AlreadyInitialized]: 'The contract is already initialized',
+  [GovernanceError.Unauthorized]: 'The caller is not authorized',
+  [GovernanceError.ProposalNotFound]: 'The proposal does not exist',
+  [GovernanceError.VotingNotActive]: 'Voting is not active for this proposal',
+  [GovernanceError.AlreadyVoted]: 'The caller has already voted',
+  [GovernanceError.QuorumNotReached]: 'The proposal did not reach quorum',
+  [GovernanceError.ProposalNotPassed]: 'The proposal did not pass',
+  [GovernanceError.AlreadyExecuted]: 'The proposal has already been executed',
+  [GovernanceError.BelowProposalThreshold]: 'The proposer is below the proposal threshold',
+  [GovernanceError.InvalidVoteChoice]: 'The vote choice is invalid',
+  [GovernanceError.VotingPeriodEnded]: 'The voting period has ended',
+  [GovernanceError.TimelockNotExpired]: 'The proposal timelock has not expired',
+  [GovernanceError.Overflow]: 'A governance calculation overflowed',
+  [GovernanceError.NoVotingPower]: 'The account has no voting power',
+  [GovernanceError.ExecutionExpired]: 'The proposal execution window has expired',
+  [GovernanceError.ContractPaused]: 'The governance contract is paused',
+  [GovernanceError.InvalidQuorumBps]: 'The quorum basis points are invalid',
+  [GovernanceError.NotInitialized]: 'The contract has not been initialized',
+  [GovernanceError.EmptyTitle]: 'The proposal title is empty',
+  [GovernanceError.TitleTooLong]: 'The proposal title is too long',
+  [GovernanceError.DescriptionTooLong]: 'The proposal description is too long',
+  [GovernanceError.MinimumQuorumRequired]: 'The quorum is below the contract minimum',
+  [GovernanceError.MinimumTimelockRequired]: 'The timelock is below the contract minimum',
+  [GovernanceError.EmptyVetoReason]: 'A veto reason is required',
+  [GovernanceError.VetoReasonTooLong]: 'The veto reason is too long',
+  [GovernanceError.VetoWindowClosed]: 'The proposal veto window has closed',
+  [GovernanceError.TargetNotAllowed]: 'The proposal target is not allowlisted',
+  [GovernanceError.InvalidCosponsors]: 'The proposal cosponsors are invalid',
+  [GovernanceError.InvalidAmount]: 'The amount is invalid',
+  [GovernanceError.InsufficientDeposit]: 'The proposer deposit is insufficient',
+  [GovernanceError.NotExecutable]: 'The proposal has no executable actions',
+  [GovernanceError.ProposalNotCancellable]: 'The proposal cannot be cancelled in its current state',
+  [GovernanceError.ProposerOnCooldown]: 'The proposer is still on cooldown',
+  [GovernanceError.VotingNotStarted]: 'The voting period has not started',
+  [GovernanceError.TooManyActions]: 'The proposal contains too many actions',
+  [GovernanceError.ActionFailed]: 'A proposal action failed',
+};
+
+/** A typed error for any governance code without a specialized SDK subclass. */
+export class GovernanceContractError extends Error {
+  readonly code: GovernanceError;
+
+  constructor(code: GovernanceError, message = GOVERNANCE_ERROR_MESSAGES[code]) {
+    super(message);
+    this.name = 'GovernanceContractError';
+    this.code = code;
+  }
+}
+
+/** Map a numeric contract code to the SDK's exhaustive governance enum. */
+export function governanceErrorFromCode(code: number): GovernanceError | undefined {
+  return Object.prototype.hasOwnProperty.call(GOVERNANCE_ERROR_MESSAGES, code)
+    ? code as GovernanceError
+    : undefined;
 }
 
 export class RpcTimeoutError extends Error {

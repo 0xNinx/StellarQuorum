@@ -25,7 +25,7 @@ describe('getAllProposals() scaling (issue #317)', () => {
         id, proposer: VOTER, title: `Proposal ${id}`, description: 'Test',
         forVotes: 100n, againstVotes: 0n, abstainVotes: 0n,
         snapshotLedger: 1000, startLedger: 1001, endLedger: 2000,
-        queueLedger: 0, quorumRequired: 50n, status: 'Active',
+        queueLedger: 0, timelockPeriod: 0, quorumRequired: 50n, status: 'Active', kind: 'Standard',
       } satisfies Proposal;
     });
     const started = performance.now();

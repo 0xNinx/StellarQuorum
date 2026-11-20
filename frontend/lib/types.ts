@@ -1,4 +1,4 @@
-export type ProposalStatus = 'active' | 'passed' | 'failed' | 'pending' | 'executed' | 'cancelled';
+export type ProposalStatus = 'active' | 'passed' | 'failed' | 'pending' | 'executed' | 'cancelled' | 'vetoed';
 export type VoteChoice = 'for' | 'against' | 'abstain';
 
 export interface Vote {
@@ -34,4 +34,5 @@ export interface Proposal {
   actions: ProposalAction[];
   votes: Vote[];
   category: string;
+  veto?: { guardian: string; reason: string };
 }

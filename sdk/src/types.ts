@@ -61,6 +61,12 @@ export interface GovernanceConfig {
   proposerCooldown: number;
 }
 
+/** Deployed contract versions reported by each contract's `version()` method. */
+export interface ContractVersions {
+  governance: string;
+  token: string;
+}
+
 export interface QuorumClientConfig {
   rpcUrl: string;
   networkPassphrase: string;
@@ -84,7 +90,7 @@ export type ReadMethod =
   | 'getProposal' | 'getProposalCount' | 'getConfig' | 'getVote'
   | 'getLatestLedger' | 'getVotingPower' | 'getBalance' | 'getTokenDecimals'
   | 'balance' | 'getPastBalance' | 'allowance' | 'totalSupply'
-  | 'getProposalsByProposer' | 'getPastTotalSupply';
+  | 'getProposalsByProposer' | 'getPastTotalSupply' | 'lockedBalance' | 'spendableBalance';
 
 export interface ReadCacheConfig {
   enabled: boolean;
