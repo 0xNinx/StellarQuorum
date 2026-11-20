@@ -739,21 +739,25 @@ export class QuorumClient {
   // These return unsigned XDR strings — the caller signs with Freighter and submits.
 
   /**
-   * Builds signable XDR for `create_proposal(proposer, title, description)` (issue #113).
+   * Builds signable XDR for `create_proposal(proposer, title, description, metadata_uri)` (issue #113, #446).
    *
    * Creates a new governance proposal. `proposer` must sign and must hold at
    * least `proposalThreshold` tokens at the governance contract's snapshot
    * ledger. `source` pays the fee and defaults to `proposer`.
    *
+   * @param metadataUri - Optional URI linking to off-chain proposal metadata.
+   *   Defaults to `''`.  Must be passed to satisfy the contract's four-argument
+   *   signature — omitting it caused simulation failures (#446).
    * @throws {Error} proposal threshold or other contract errors.
    */
-  async buildCreateProposal(proposer: string, title: string, description: string, source?: string): Promise<string> {
+  async buildCreateProposal(proposer: string, title: string, description: string, metadataUri: string = '', source?: string): Promise<string> {
     return this.buildGovernanceTransaction(
       source ?? proposer,
       'create_proposal',
       new Address(proposer).toScVal(),
       nativeToScVal(title, { type: 'string' }),
       nativeToScVal(description, { type: 'string' }),
+      nativeToScVal(metadataUri, { type: 'string' }),
     );
   }
 

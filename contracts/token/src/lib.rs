@@ -19,6 +19,9 @@ pub enum TokenError {
     AlreadyStaked         = 11,
     NotStaked             = 12,
     LockNotExpired        = 13,
+    /// Returned by any function that requires the token to be initialized when
+    /// it has not been set up yet (issue #436).
+    NotInitialized        = 14,
 }
 
 /// A balance recorded at the ledger on which it changed.
@@ -182,6 +185,28 @@ const TTL_EXTEND_TO: u32 = LEDGERS_PER_DAY * 90;
 /// every `get_past_balance`. This is twice the 30-day maximum the create form
 /// offers. If governance is configured with a longer `voting_period`, raise it.
 const CHECKPOINT_RETENTION: u32 = LEDGERS_PER_DAY * 60;
+
+/// Hard cap on balance checkpoints per account (issue #434).
+///
+/// Retention-window pruning already removes checkpoints older than
+/// `CHECKPOINT_RETENTION`, but dust spam can still push one new entry per
+/// ledger within the window (~1 M entries over 60 days). This cap bounds the
+/// per-entry write cost: when hit, only the last `MAX_CHECKPOINTS_PER_ACCOUNT`
+/// entries are kept. The oldest retained entry is never the very first one
+/// (that would erase history inside the voting window), so `value_at` queries
+/// within the retention window stay correct as long as the cap >> the typical
+/// proposal voting period (usually ≤ 7 days × 17280 ≈ 121 K ledgers).
+const MAX_CHECKPOINTS_PER_ACCOUNT: u32 = 150_000;
+
+/// Hard cap on supply checkpoints (issue #433).
+///
+/// Unlike balance checkpoints, supply checkpoints are never pruned by design
+/// (admin mints and holder burns are infrequent). But a malicious actor can
+/// call `burn(1)` every ledger to bloat the vector. When the cap is hit we
+/// keep only the latest `MAX_SUPPLY_CHECKPOINTS` entries; the binary search in
+/// `get_past_total_supply` still works correctly for snapshots within that
+/// retained range.
+const MAX_SUPPLY_CHECKPOINTS: u32 = 50_000;
 
 /// Maximum precision supported by the token's public formatting contract.
 const MAX_DECIMALS: u32 = 18;
@@ -375,7 +400,7 @@ impl QuorumToken {
     }
 
     pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(TokenError::NotInitialized)?;
         admin.require_auth();
         if amount <= 0 { return Err(TokenError::InvalidAmount); }
         // Checked, so an overflowing mint returns `Overflow` instead of
@@ -453,7 +478,7 @@ impl QuorumToken {
     }
 
     pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), TokenError> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(TokenError::NotInitialized)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
         env.events().publish(
@@ -467,7 +492,7 @@ impl QuorumToken {
         let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
             .ok_or(TokenError::Unauthorized)?;
         pending.require_auth();
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(TokenError::NotInitialized)?;
         env.storage().instance().set(&DataKey::Admin, &pending);
         env.storage().instance().remove(&DataKey::PendingAdmin);
 
@@ -479,7 +504,7 @@ impl QuorumToken {
     }
 
     pub fn cancel_admin_transfer(env: Env) -> Result<(), TokenError> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(TokenError::NotInitialized)?;
         admin.require_auth();
         env.storage().instance().remove(&DataKey::PendingAdmin);
         env.events().publish(
@@ -489,9 +514,15 @@ impl QuorumToken {
         Ok(())
     }
 
-    pub fn name(env: Env) -> String { env.storage().instance().get(&DataKey::Name).unwrap() }
-    pub fn symbol(env: Env) -> String { env.storage().instance().get(&DataKey::Symbol).unwrap() }
-    pub fn decimals(env: Env) -> u32 { env.storage().instance().get(&DataKey::Decimals).unwrap() }
+    pub fn name(env: Env) -> Result<String, TokenError> {
+        env.storage().instance().get(&DataKey::Name).ok_or(TokenError::NotInitialized)
+    }
+    pub fn symbol(env: Env) -> Result<String, TokenError> {
+        env.storage().instance().get(&DataKey::Symbol).ok_or(TokenError::NotInitialized)
+    }
+    pub fn decimals(env: Env) -> Result<u32, TokenError> {
+        env.storage().instance().get(&DataKey::Decimals).ok_or(TokenError::NotInitialized)
+    }
 
     /// Assigns the holder's own balance to one representative. Incoming
     /// delegations stay with their recipient: delegation is not transitive.
@@ -782,6 +813,15 @@ impl QuorumToken {
             checkpoints = checkpoints.slice(stale - 1..);
         }
 
+        // Hard cap: if retention-window pruning alone did not shrink the vec
+        // enough (e.g. dust spam within the window), keep only the most-recent
+        // MAX_CHECKPOINTS_PER_ACCOUNT entries (issue #434).
+        let cap = MAX_CHECKPOINTS_PER_ACCOUNT;
+        if checkpoints.len() > cap {
+            let drop = checkpoints.len() - cap;
+            checkpoints = checkpoints.slice(drop..);
+        }
+
         let checkpoints_key = DataKey::Checkpoints(owner.clone());
         env.storage().persistent().set(&checkpoints_key, &checkpoints);
         Self::touch(env, &checkpoints_key);
@@ -940,8 +980,32 @@ impl QuorumToken {
     fn set_total_supply(env: &Env, total_supply: i128) {
         env.storage().instance().set(&DataKey::TotalSupply, &total_supply);
 
+        let ledger = env.ledger().sequence();
         let mut checkpoints = Self::supply_checkpoints(env);
-        Self::record(&mut checkpoints, env.ledger().sequence(), total_supply);
+        Self::record(&mut checkpoints, ledger, total_supply);
+
+        // Prune supply checkpoints that fall outside the retention window, same
+        // logic as balance checkpoints (issue #433). The comment in the
+        // original doc that "this is never pruned" held at low mint/burn rates,
+        // but a hostile burn(1) loop would bloat the vec without bound.
+        let cutoff = ledger.saturating_sub(CHECKPOINT_RETENTION);
+        let mut stale = 0u32;
+        while stale < checkpoints.len() {
+            match checkpoints.get(stale) {
+                Some(entry) if entry.ledger < cutoff => stale += 1,
+                _ => break,
+            }
+        }
+        if stale > 1 {
+            checkpoints = checkpoints.slice(stale - 1..);
+        }
+
+        // Hard cap in case spam stays within the retention window.
+        let cap = MAX_SUPPLY_CHECKPOINTS;
+        if checkpoints.len() > cap {
+            let drop = checkpoints.len() - cap;
+            checkpoints = checkpoints.slice(drop..);
+        }
 
         let key = DataKey::SupplyCheckpoints;
         env.storage().persistent().set(&key, &checkpoints);
