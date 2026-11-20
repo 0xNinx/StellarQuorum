@@ -35,3 +35,14 @@ Closes #
 - [ ] Documentation has been updated where applicable (README, JSDoc, docs/)
 - [ ] No temporary debug code or extraneous logging left in
 - [ ] Commits follow the Conventional Commits specification
+
+## Contract Security Checklist
+
+<!-- Complete this section if the PR changes anything under contracts/. Otherwise delete it. -->
+
+- [ ] Every state change emits an event, and new or changed events are documented
+- [ ] `require_auth()` is called on the right address before any state is read for a decision or written
+- [ ] Arithmetic on balances, votes and ledger numbers uses checked operations (`checked_add`, `checked_mul`, ...) or is proven not to overflow
+- [ ] New or touched persistent and instance entries extend their TTL where they are written and read
+- [ ] The TypeScript and Python SDKs are updated for any changed function, argument, error or event
+- [ ] WASM size is within the baseline (`scripts/check-wasm-size.sh`, `contracts/wasm-size-baseline.txt`)

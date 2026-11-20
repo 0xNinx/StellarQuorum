@@ -1220,6 +1220,79 @@ fn a_non_guardian_cannot_veto() {
     );
 }
 
+// A 2-of-3 multisig guardian modelled as a contract. Each signer approves the
+// veto; once the threshold is reached the contract calls veto() itself, so the
+// governor sees the multisig address as the caller.
+#[contract]
+struct MultisigGuardian;
+
+#[contractimpl]
+impl MultisigGuardian {
+    pub fn setup(env: Env, governance: Address, signers: soroban_sdk::Vec<Address>, threshold: u32) {
+        env.storage().instance().set(&Symbol::new(&env, "gov"), &governance);
+        env.storage().instance().set(&Symbol::new(&env, "signers"), &signers);
+        env.storage().instance().set(&Symbol::new(&env, "threshold"), &threshold);
+    }
+
+    pub fn approve_veto(env: Env, signer: Address, proposal_id: u64, reason: String) -> bool {
+        signer.require_auth();
+        let signers: soroban_sdk::Vec<Address> =
+            env.storage().instance().get(&Symbol::new(&env, "signers")).unwrap();
+        assert!(signers.contains(&signer), "not a signer");
+
+        let key = (Symbol::new(&env, "approvals"), proposal_id);
+        let mut approvals: soroban_sdk::Vec<Address> =
+            env.storage().instance().get(&key).unwrap_or(soroban_sdk::Vec::new(&env));
+        if !approvals.contains(&signer) {
+            approvals.push_back(signer);
+        }
+        env.storage().instance().set(&key, &approvals);
+
+        let threshold: u32 = env.storage().instance().get(&Symbol::new(&env, "threshold")).unwrap();
+        if approvals.len() < threshold {
+            return false;
+        }
+        let governance: Address = env.storage().instance().get(&Symbol::new(&env, "gov")).unwrap();
+        GovernanceContractClient::new(&env, &governance).veto(
+            &env.current_contract_address(),
+            &proposal_id,
+            &reason,
+        );
+        true
+    }
+}
+
+#[test]
+fn a_two_of_three_multisig_guardian_can_veto() {
+    let env = Env::default();
+    let (admin, governance_id, proposal_id) = open_with_holders(&env, 1_000_000, QUORUM_BPS, &[]);
+    let governance = GovernanceContractClient::new(&env, &governance_id);
+    queue_proposal(&env, &governance, &admin, proposal_id);
+
+    let multisig_id = env.register(MultisigGuardian, ());
+    let multisig = MultisigGuardianClient::new(&env, &multisig_id);
+    let signers = soroban_sdk::vec![
+        &env,
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env)
+    ];
+    multisig.setup(&governance_id, &signers, &2);
+    governance.set_guardian(&multisig_id);
+
+    // A single signer cannot veto directly, and one approval is not enough.
+    assert_eq!(
+        governance.try_veto(&signers.get(0).unwrap(), &proposal_id, &veto_reason(&env)),
+        Err(Ok(GovernanceError::Unauthorized))
+    );
+    assert!(!multisig.approve_veto(&signers.get(0).unwrap(), &proposal_id, &veto_reason(&env)));
+    assert_eq!(governance.get_proposal(&proposal_id).status, ProposalStatus::Queued);
+
+    // The second approval meets the 2-of-3 threshold and the veto lands.
+    assert!(multisig.approve_veto(&signers.get(1).unwrap(), &proposal_id, &veto_reason(&env)));
+    assert_eq!(governance.get_proposal(&proposal_id).status, ProposalStatus::Vetoed);
+}
+
 #[test]
 fn a_veto_without_a_reason_is_rejected() {
     let env = Env::default();
