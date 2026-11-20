@@ -94,6 +94,21 @@ pub struct AdminTransferred {
     pub new_admin: Address,
 }
 
+/// Emitted when an admin transfer is proposed (before acceptance).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferProposed {
+    pub current_admin: Address,
+    pub proposed_admin: Address,
+}
+
+/// Emitted when a pending admin transfer is cancelled by the current admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferCancelled {
+    pub admin: Address,
+}
+
 /// Emitted when a holder changes the destination of their own voting power.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -423,6 +438,10 @@ impl QuorumToken {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events().publish(
+            (Symbol::new(&env, "admin_transfer_proposed"), admin.clone()),
+            AdminTransferProposed { current_admin: admin, proposed_admin: new_admin },
+        );
         Ok(())
     }
 
@@ -445,6 +464,10 @@ impl QuorumToken {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish(
+            (Symbol::new(&env, "admin_transfer_cancelled"), admin.clone()),
+            AdminTransferCancelled { admin },
+        );
         Ok(())
     }
 
