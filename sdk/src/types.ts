@@ -36,6 +36,8 @@ export interface Proposal {
   status: ProposalStatus;
   /** Ledger sequence at which the timelock expires and execution is allowed. */
   timelockPeriod: number;
+  /** Ledger sequence after queue_ledger by which execution must occur. */
+  executionGracePeriod: number;
   /** Optional IPFS or HTTPS URI for extended proposal metadata. */
   metadataUri?: string;
   /** Whether this is a standard governance call or a contract upgrade. */

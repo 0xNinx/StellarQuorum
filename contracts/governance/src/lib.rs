@@ -62,6 +62,7 @@ pub enum GovernanceError {
     VotingNotStarted        = 34,
     TooManyActions          = 35,
     ActionFailed            = 36,
+    TokenDelegationFailed  = 37,
 }
 
 /// Basis-point denominator: `quorum_bps` of 500 means 5% of total supply.
@@ -244,6 +245,21 @@ pub struct AdminTransferred {
     pub new_admin: Address,
 }
 
+/// Emitted when an admin transfer is proposed (before acceptance).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferProposed {
+    pub current_admin: Address,
+    pub proposed_admin: Address,
+}
+
+/// Emitted when a pending admin transfer is cancelled by the current admin.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferCancelled {
+    pub admin: Address,
+}
+
 /// Emitted when the admin replaces the guardian allowed to veto queued proposals.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -369,6 +385,9 @@ pub struct Proposal {
     /// Copied from `Config` when the proposal is created, so a later config
     /// change cannot alter how long this proposal waits before execution.
     pub timelock_period: u32,
+    /// Copied from `Config` when the proposal is created, so a later config
+    /// change cannot alter how long this proposal has to execute after the timelock.
+    pub execution_grace_period: u32,
     pub status: ProposalStatus,
     pub metadata_uri: String,
     pub kind: ProposalKind,
@@ -591,9 +610,9 @@ impl GovernanceContract {
                 if error == soroban_sdk::Error::from_contract_error(6) {
                     return Err(GovernanceError::Overflow);
                 }
-                env.panic_with_error(error);
+                return Err(GovernanceError::TokenDelegationFailed);
             }
-            _ => panic!("token delegation invocation failed"),
+            _ => return Err(GovernanceError::TokenDelegationFailed),
         }
         let delegatee = token.get_delegates(&delegator);
         // Record facade calls for compatibility, but never resolve votes or
@@ -718,8 +737,8 @@ impl GovernanceContract {
         if env.ledger().sequence() < proposal.queue_ledger { return Err(GovernanceError::TimelockNotExpired); }
 
         // Check if execution grace period has expired
-        let execution_deadline = proposal.queue_ledger + config.execution_grace_period;
-        if config.execution_grace_period > 0 && env.ledger().sequence() > execution_deadline {
+        let execution_deadline = proposal.queue_ledger + proposal.execution_grace_period;
+        if proposal.execution_grace_period > 0 && env.ledger().sequence() > execution_deadline {
             return Err(GovernanceError::ExecutionExpired);
         }
 
@@ -765,6 +784,10 @@ impl GovernanceContract {
         let config = Self::get_config(env.clone());
         config.admin.require_auth();
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events().publish(
+            (Symbol::new(&env, "admin_transfer_proposed"), config.admin.clone()),
+            AdminTransferProposed { current_admin: config.admin, proposed_admin: new_admin },
+        );
         Ok(())
     }
 
@@ -774,9 +797,14 @@ impl GovernanceContract {
             .ok_or(GovernanceError::Unauthorized)?;
         pending.require_auth();
         let mut config = Self::get_config(env.clone());
-        config.admin = pending;
+        let previous_admin = config.admin.clone();
+        config.admin = pending.clone();
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish(
+            (Symbol::new(&env, "admin_transferred"), previous_admin.clone()),
+            AdminTransferred { previous_admin, new_admin: pending },
+        );
         Ok(())
     }
 
@@ -909,8 +937,7 @@ impl GovernanceContract {
     pub fn get_proposal_phase(env: Env, id: u64) -> Result<ProposalPhase, GovernanceError> {
         let proposal: Proposal = env.storage().persistent()
             .get(&DataKey::Proposal(id)).ok_or(GovernanceError::ProposalNotFound)?;
-        let config: Config = Self::require_config(&env)?;
-        Ok(Self::phase_of(&proposal, env.ledger().sequence(), config.execution_grace_period))
+        Ok(Self::phase_of(&proposal, env.ledger().sequence(), proposal.execution_grace_period))
     }
 
     /// Governance-wide counters, read in O(1). They are maintained by the calls
@@ -1142,6 +1169,10 @@ impl GovernanceContract {
         let config = Self::get_config(env.clone());
         config.admin.require_auth();
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish(
+            (Symbol::new(&env, "admin_transfer_cancelled"), config.admin.clone()),
+            AdminTransferCancelled { admin: config.admin },
+        );
         Ok(())
     }
 
@@ -1229,7 +1260,7 @@ impl GovernanceContract {
 
         let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
         let voting_power = TokenClient::new(&env, &config.token)
-            .get_past_balance(&voter, &proposal.snapshot_ledger);
+            .get_past_votes(&voter, &proposal.snapshot_ledger);
 
         Ok(voting_power)
     }
@@ -1247,10 +1278,9 @@ impl GovernanceContract {
             return Err(GovernanceError::ProposalNotPassed);
         }
 
-        let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
-        let execution_deadline = proposal.queue_ledger + config.execution_grace_period;
+        let execution_deadline = proposal.queue_ledger + proposal.execution_grace_period;
 
-        if config.execution_grace_period > 0 && env.ledger().sequence() > execution_deadline {
+        if proposal.execution_grace_period > 0 && env.ledger().sequence() > execution_deadline {
             proposal.status = ProposalStatus::Expired;
             env.storage().persistent().set(&DataKey::Proposal(proposal_id), &proposal);
             Self::touch_proposal(&env, proposal_id);
@@ -1362,6 +1392,7 @@ impl GovernanceContract {
             queue_ledger: 0,
             quorum_required,
             timelock_period: config.timelock_period,
+            execution_grace_period: config.execution_grace_period,
             status: ProposalStatus::Active,
             metadata_uri: metadata_uri.clone(),
             kind: ProposalKind::Executable,
