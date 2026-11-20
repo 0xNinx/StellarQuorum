@@ -500,6 +500,9 @@ impl GovernanceContract {
     /// first. After `end_ledger` a repeat call is rejected with `AlreadyVoted`.
     pub fn vote(env: Env, voter: Address, proposal_id: u64, support: u32) -> Result<(), GovernanceError> {
         let config: Config = Self::require_config(&env)?;
+        if config.paused {
+            return Err(GovernanceError::ContractPaused);
+        }
         voter.require_auth();
         if support > 2 { return Err(GovernanceError::InvalidVoteChoice); }
         let mut proposal: Proposal = env.storage().persistent()
@@ -621,6 +624,9 @@ impl GovernanceContract {
 
     pub fn finalize(env: Env, proposal_id: u64) -> Result<ProposalStatus, GovernanceError> {
         let config: Config = Self::require_config(&env)?;
+        if config.paused {
+            return Err(GovernanceError::ContractPaused);
+        }
         let mut proposal: Proposal = env.storage().persistent()
             .get(&DataKey::Proposal(proposal_id)).ok_or(GovernanceError::ProposalNotFound)?;
         if env.ledger().sequence() <= proposal.end_ledger { return Err(GovernanceError::VotingNotActive); }
@@ -793,7 +799,7 @@ impl GovernanceContract {
         let mut proposals = soroban_sdk::Vec::new(&env);
 
         if start < 1 || start > count {
-            return Ok(proposals); // Empty page for out-of-range start
+            return core::prelude::v1::Ok(proposals); // Empty page for out-of-range start
         }
 
         let end = start.saturating_add(u64::from(bounded_limit)).min(count + 1);
@@ -809,13 +815,32 @@ impl GovernanceContract {
 
     /// Returns all proposals opened by a specific address.
     /// Returns an empty vector if the address has never proposed.
-    pub fn get_proposals_by_proposer(env: Env, proposer: Address) -> soroban_sdk::Vec<Proposal> {
-        let mut proposals = soroban_sdk::Vec::new(&env);
+/// Returns all proposals opened by a specific address.
+    /// Returns an empty vector if the address has never proposed.
+    /// `start` is the first proposal index to return (1-indexed, per-proposer).
+    /// `limit` is bounded to prevent resource exhaustion.
+    pub fn get_proposals_by_proposer(
+        env: Env,
+        proposer: Address,
+        start: Option<u64>,
+        limit: Option<u32>,
+    ) -> soroban_sdk::Vec<Proposal> {
+        let start_idx = start.unwrap_or(1);
+        let limit_val = limit.unwrap_or(100);
+
         let count: u64 = env.storage().persistent()
             .get(&DataKey::ProposerCount(proposer.clone()))
             .unwrap_or(0);
 
-        for i in 1..=count {
+        let mut proposals = soroban_sdk::Vec::new(&env);
+
+        if start_idx < 1 || start_idx > count {
+            return proposals; // Empty page for out-of-range start
+        }
+
+        let end = start_idx.saturating_add(u64::from(limit_val)).min(count + 1);
+
+        for i in start_idx..end {
             if let Some(proposal_id) = env.storage().persistent()
                 .get::<DataKey, u64>(&DataKey::ProposerIndex(proposer.clone(), i)) {
                 if let Ok(proposal) = Self::get_proposal(env.clone(), proposal_id) {
@@ -826,6 +851,7 @@ impl GovernanceContract {
 
         proposals
     }
+
 
     pub fn has_voted(env: Env, proposal_id: u64, voter: Address) -> bool {
         env.storage().persistent().has(&DataKey::HasVoted(proposal_id, voter))
@@ -982,9 +1008,13 @@ impl GovernanceContract {
     /// voting is open. The target must be allowlisted now, and `execute()` checks
     /// it again.
     pub fn set_proposal_action(env: Env, proposer: Address, proposal_id: u64, target: Address, function: Symbol, args: soroban_sdk::Vec<Val>) -> Result<(), GovernanceError> {
+        let config: Config = Self::require_config(&env)?;
         proposer.require_auth();
         let proposal: Proposal = env.storage().persistent()
             .get(&DataKey::Proposal(proposal_id)).ok_or(GovernanceError::ProposalNotFound)?;
+        if config.paused {
+            return Err(GovernanceError::ContractPaused);
+        }
         if proposer != proposal.proposer {
             return Err(GovernanceError::Unauthorized);
         }
@@ -1097,13 +1127,18 @@ impl GovernanceContract {
     }
 
     /// Pause the contract. Only admin or guardian can pause.
-    /// Blocks proposal creation and execution.
+    /// Blocks proposal creation, voting, finalization, and proposal actions.
+    /// Idempotent: calling pause() when already paused returns Ok.
     pub fn pause(env: Env, caller: Address) -> Result<(), GovernanceError> {
         caller.require_auth();
         let mut config = Self::get_config(env.clone());
 
         if caller != config.admin && caller != config.guardian {
             return Err(GovernanceError::Unauthorized);
+        }
+
+        if config.paused {
+            return Ok(());
         }
 
         config.paused = true;
@@ -1117,9 +1152,14 @@ impl GovernanceContract {
     }
 
     /// Unpause the contract. Only admin can unpause.
+    /// Idempotent: calling unpause() when already unpaused returns Ok.
     pub fn unpause(env: Env) -> Result<(), GovernanceError> {
         let mut config = Self::get_config(env.clone());
         config.admin.require_auth();
+
+        if !config.paused {
+            return Ok(());
+        }
 
         config.paused = false;
         env.storage().instance().set(&DataKey::Config, &config);
@@ -1180,7 +1220,10 @@ impl GovernanceContract {
     pub fn mark_expired(env: Env, proposal_id: u64) -> Result<(), GovernanceError> {
         let mut proposal: Proposal = env.storage().persistent()
             .get(&DataKey::Proposal(proposal_id)).ok_or(GovernanceError::ProposalNotFound)?;
-
+        let config: Config = env.storage().instance().get(&DataKey::Config).unwrap();
+        if config.paused {
+            return Err(GovernanceError::ContractPaused);
+        }
         if proposal.status != ProposalStatus::Queued {
             return Err(GovernanceError::ProposalNotPassed);
         }
