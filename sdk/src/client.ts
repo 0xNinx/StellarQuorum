@@ -1101,6 +1101,7 @@ interface RawProposal {
   quorum_required: bigint;
   status: [string];
   timelock_period?: number;
+  execution_grace_period?: number;
   metadata_uri?: string;
   kind?: [string];
 }
@@ -1146,6 +1147,7 @@ function decodeProposal(raw: RawProposal): Proposal {
     quorumRequired: raw.quorum_required,
     status: decodeStatus(raw.status),
     timelockPeriod: raw.timelock_period ?? 0,
+    executionGracePeriod: raw.execution_grace_period ?? 0,
     ...(raw.metadata_uri === undefined ? {} : { metadataUri: raw.metadata_uri }),
     kind: raw.kind ? (raw.kind[0] as 'Standard' | 'Upgrade') : 'Standard',
   };
