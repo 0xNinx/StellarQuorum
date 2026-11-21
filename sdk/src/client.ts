@@ -1,5 +1,5 @@
 import { rpc, Contract, Transaction, TransactionBuilder, BASE_FEE, nativeToScVal, scValToNative, Address, Account, xdr } from '@stellar/stellar-sdk';
-import type { Proposal, ConvictionTally, GovernanceConfig, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions } from './types.js';
+import type { Proposal, ConvictionTally, ContractVersions, GovernanceConfig, GovernanceStats, QuorumClientConfig, VoteSupport, GetProposalsOptions, ProposalStatus, TransactionConfirmationOptions, WaitForStatusOptions, FeeEstimate, ReadMethod, ReadOptions } from './types.js';
 import { ReadCache } from './cache.js';
 import { SimulationBatcher, postSimulationBatch } from './batch.js';
 import { GovernanceContractError, GOVERNANCE_ERROR_MESSAGES, GovernanceError, governanceErrorFromCode, parseGovernanceError, RpcTimeoutError, TransactionFailedError, contractErrorCode } from './errors.js';
