@@ -46,6 +46,12 @@ export interface Proposal {
   kind: ProposalKind;
 }
 
+export interface ConvictionTally {
+  forConviction: bigint;
+  againstConviction: bigint;
+  updatedLedger: number;
+}
+
 export interface GovernanceConfig {
   token: string;
   quorumBps: number;
@@ -94,7 +100,8 @@ export type ReadMethod =
   | 'getProposal' | 'getProposalCount' | 'getConfig' | 'getVote'
   | 'getLatestLedger' | 'getVotingPower' | 'getBalance' | 'getTokenDecimals'
   | 'balance' | 'getPastBalance' | 'allowance' | 'totalSupply'
-  | 'getProposalsByProposer' | 'getPastTotalSupply' | 'lockedBalance' | 'spendableBalance';
+  | 'getProposalsByProposer' | 'getPastTotalSupply'
+  | 'getCosponsors' | 'getConviction';
 
 export interface ReadCacheConfig {
   enabled: boolean;
