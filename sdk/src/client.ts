@@ -281,6 +281,16 @@ export class QuorumClient {
     return this.simulate<string>('get_delegate', new Address(holder).toScVal());
   }
 
+  /** Effective delegated voting power at a historical ledger. */
+  async getPastVotes(holder: string, ledger: number, options?: ReadOptions): Promise<bigint> {
+    if (!Number.isInteger(ledger) || ledger < 0 || ledger > 0xffff_ffff) {
+      throw new RangeError('ledger must be a non-negative u32');
+    }
+    return BigInt(await this.simulate<bigint | number>(
+      'get_past_votes', new Address(holder).toScVal(), nativeToScVal(ledger, { type: 'u32' }),
+    ));
+  }
+
   async getBalance(voter: string, options?: ReadOptions): Promise<bigint> {
     return this.cache.read('getBalance', [voter], options, async () => {
       const token = await this.tokenContract(options);
@@ -1206,10 +1216,21 @@ export class QuorumClient {
   /**
    * Derived display phase for a proposal, computed server-side so the client
    * does not need to compare ledger sequences.
-   * Returns one of: `'Pending' | 'Voting' | 'TimelockPending' | ProposalStatus`.
+   * Returns the contract-derived lifecycle phase, including `Ended` and
+   * `ReadyToExecute`.
    */
-  async getProposalPhase(proposalId: bigint, options?: ReadOptions): Promise<string> {
-    return this.simulate<string>('get_proposal_phase', nativeToScVal(proposalId, { type: 'u64' }));
+  async getProposalPhase(proposalId: bigint, options?: ReadOptions): Promise<ProposalPhase> {
+    const raw = await this.simulate<unknown>('get_proposal_phase', nativeToScVal(proposalId, { type: 'u64' }));
+    // Soroban encodes contract enums as a one-item vector of symbols.
+    const phase = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
+    const phases: readonly string[] = [
+      'Pending', 'Active', 'Ended', 'Queued', 'ReadyToExecute', 'Passed',
+      'Executed', 'Failed', 'Cancelled', 'Expired', 'Vetoed',
+    ];
+    if (typeof phase !== 'string' || !phases.includes(phase)) {
+      throw new Error(`Unknown proposal phase returned by contract: ${String(phase)}`);
+    }
+    return phase as ProposalPhase;
   }
 
   /**
